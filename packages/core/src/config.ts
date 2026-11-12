@@ -53,8 +53,8 @@ export const settingsSchema = z.object({
         "R5 No NSFW content.",
       ].join("\n"),
     ),
-  kbStartUrls: z.array(z.string()).default(["https://support.nu.fi/support/solutions"]),
-  kbAllowedHosts: z.array(z.string()).default(["support.nu.fi"]),
+  kbStartUrls: z.array(z.string()).default(["https://support.nu.fi/support/solutions", "https://nu.fi/", "https://nu.fi/chains/support"]),
+  kbAllowedHosts: z.array(z.string()).default(["support.nu.fi", "nu.fi"]),
   crawlIntervalHours: z.number().default(24),
 });
 
