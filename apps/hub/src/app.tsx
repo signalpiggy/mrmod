@@ -377,7 +377,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                   {d.ruleId ?? "–"} <ModePill mode={d.mode} />
                   <div class="hint">
                     {d.plannedAction
-                      ? [d.plannedAction.delete && "delete", d.plannedAction.timeoutMinutes && `timeout ${d.plannedAction.timeoutMinutes}m`, d.plannedAction.alert && "alert"]
+                      ? [d.plannedAction.delete && "delete", d.plannedAction.ban && "ban", d.plannedAction.timeoutMinutes && `timeout ${d.plannedAction.timeoutMinutes}m`, d.plannedAction.alert && "alert"]
                           .filter(Boolean)
                           .join(", ") || "log only"
                       : ""}
@@ -420,7 +420,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
         <h1>Rules</h1>
         <p class="hint">
           Rules are checked top to bottom; the first match decides. <b>Shadow</b> logs what it would do; <b>enforce</b> acts (only when the global mode
-          on Overview allows it). Bans are never automatic: "recommend ban" adds a Ban button to the admin alert.
+          on Overview allows it). "Ban member" bans automatically when the rule is enforced (and deletes their last hour of messages); "recommend ban" only adds a Ban button to the admin alert.
         </p>
         {ruleRows.map((r) => {
           const d = r.definition;
@@ -469,6 +469,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                   [
                     ["delete", "Delete message"],
                     ["alert", "Alert admins"],
+                    ["ban", "Ban member"],
                     ["recommendBan", "Recommend ban"],
                   ] as const
                 ).map(([k, l]) => (
@@ -515,6 +516,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
         delete: b.delete === "1",
         alert: b.alert === "1",
         recommendBan: b.recommendBan === "1",
+        ban: b.ban === "1",
         timeoutMinutes: Math.max(0, Math.min(40320, Math.round(Number(b.timeoutMinutes) || 0))),
       },
     };
