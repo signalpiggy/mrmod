@@ -27,6 +27,10 @@ export const settingsSchema = z.object({
         "Write in plain, friendly English. Reply in the language the question was asked in.",
       ].join("\n"),
     ),
+  /** How each source link is written under an answer. {url} and {title} are replaced. Wrap the URL in <> to stop Discord's preview card. */
+  answerLinkFormat: z.string().default("🔗 <{url}>"),
+  /** Longest answer text (before links and footer). */
+  answerMaxChars: z.number().int().min(100).max(1700).default(1200),
   /** Appended to every bot answer. */
   answerFooter: z.string().default("🤖 AI-generated answer. For clarification, ping @AdminBen"),
   exemptRoleIds: z.array(z.string()).default([]),
