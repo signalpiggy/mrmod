@@ -38,6 +38,9 @@ describe("support scam detection (Ben's rule)", () => {
     ["contact the support team via https://bit.ly/abc", true],
     ["Raise a ticket using this link discord.gg/fakesupport", true],
     ["check your dm, I sent you the fix for your problem", true],
+    ["click here to get support: test.domain.com", true],
+    ["Need help? support desk -> nufi-help.app", true],
+    ["for assistance visit https://wallet-rectify.site", true],
   ] as const;
   for (const [text, strong] of scams) {
     it(`flags: ${text}`, () => {
@@ -130,6 +133,14 @@ describe("pipeline", () => {
     random: () => 1,
   });
 
+  it("logs every message when logAllMessages is on", async () => {
+    const deps = base();
+    deps.judge = async () => ({ verdict: { verdict: "ok", confidence: 0.99, rule_broken: null, reason: "greeting", source: "llm" }, model: "m", latencyMs: 1, inputTokens: 1, outputTokens: 1 });
+    const d = await runPipeline(msg("gm"), deps);
+    expect(d?.record).toBe(true);
+    expect(d?.match).toBeNull();
+  });
+
   it("skips bots and exempt roles", async () => {
     expect(await runPipeline(msg("hi", { authorIsBot: true }), base())).toBeNull();
     const deps = base();
@@ -137,9 +148,10 @@ describe("pipeline", () => {
     expect(await runPipeline(msg("dm me for support", { memberRoleIds: ["staff"] }), deps)).toBeNull();
   });
 
-  it("does not call the judge for a quiet established member", async () => {
+  it("does not call the judge for a quiet established member (when judgeAll is off)", async () => {
     let called = 0;
     const deps = base();
+    deps.settings = { ...defaultSettings, judgeAll: false, logAllMessages: false };
     deps.judge = async (...a) => {
       called++;
       return base().judge!(...a);

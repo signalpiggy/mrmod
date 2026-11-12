@@ -11,8 +11,10 @@ export const settingsSchema = z.object({
   riskThreshold: z.number().default(1),
   /** Always judge members who joined less than this many days ago. 0 disables. */
   judgeNewMembersDays: z.number().default(7),
-  /** Judge every message from non-exempt members (costs more, catches more). */
-  judgeAll: z.boolean().default(false),
+  /** Judge every message from non-exempt members (costs more, catches more). On while testing. */
+  judgeAll: z.boolean().default(true),
+  /** Record every message (and post each to the mod log), not just suspicious ones. On while testing. */
+  logAllMessages: z.boolean().default(true),
   exemptRoleIds: z.array(z.string()).default([]),
   exemptChannelIds: z.array(z.string()).default([]),
   /** Members with these roles are only judged if a signal fires. */

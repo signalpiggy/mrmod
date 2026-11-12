@@ -28,7 +28,7 @@ button.ghost{background:transparent;color:var(--accent)}button.small{padding:3px
 
 const NAV = [
   ["/", "Overview"],
-  ["/decisions", "Decisions"],
+  ["/decisions", "Message log"],
   ["/rules", "Rules"],
   ["/settings", "Settings"],
   ["/knowledge", "Knowledge"],

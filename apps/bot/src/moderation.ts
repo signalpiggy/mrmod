@@ -18,7 +18,7 @@ import {
 import { log } from "./log.js";
 import type { BotState } from "./state.js";
 
-const COLORS = { enforce: 0xd9480f, shadow: 0x7048e8, review: 0x868e96, sample: 0x2f9e44 } as const;
+const COLORS = { enforce: 0xd9480f, shadow: 0x7048e8, allowed: 0x868e96, sample: 0x2f9e44 } as const;
 
 export async function toInput(message: Message<true>): Promise<MessageInput> {
   const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
@@ -109,7 +109,7 @@ function describe(d: Decision): string {
 }
 
 function actionText(d: Decision, executed: string[]): string {
-  if (!d.match) return d.sampled ? "Allowed (random sample for review)" : "None";
+  if (!d.match) return d.sampled ? "Allowed (random sample for review)" : "Allowed";
   const a = d.match.action;
   const planned = [a.delete && "delete", a.timeoutMinutes && `timeout ${a.timeoutMinutes}m`, a.alert && "alert admins", a.recommendBan && "recommend ban"]
     .filter(Boolean)
@@ -119,12 +119,12 @@ function actionText(d: Decision, executed: string[]): string {
 }
 
 function buildEmbed(id: number, d: Decision, executed: string[]) {
-  const mode = d.match ? (d.match.mode === "enforce" ? "enforce" : "shadow") : d.sampled ? "sample" : "review";
+  const mode = d.match ? (d.match.mode === "enforce" ? "enforce" : "shadow") : d.sampled ? "sample" : "allowed";
   const link = `https://discord.com/channels/${d.input.guildId}/${d.input.channelId}/${d.input.messageId}`;
   const s = d.signals;
   return new EmbedBuilder()
     .setColor(COLORS[mode])
-    .setTitle(`#${id} · ${d.match ? d.match.rule.name : "Sampled message"} · ${mode.toUpperCase()}`)
+    .setTitle(`#${id} · ${d.match ? d.match.rule.name : d.sampled ? "Sampled message" : "No rule matched"} · ${mode.toUpperCase()}`)
     .setDescription(`> ${d.input.content.slice(0, 900).replace(/\n/g, "\n> ")}`)
     .addFields(
       { name: "Author", value: `<@${d.input.authorId}> · ${d.input.authorTag}`, inline: true },

@@ -76,6 +76,18 @@ export function detectSupportScam(text: string, hasLink: boolean): Signals["supp
     }
   }
 
+  // Any mention of support/help next to a link ("click here to get support: x.com", "help desk: x.app").
+  const supportWord =
+    /\b(support|supports|help ?desk|helpdesk|help center|help centre|assistance|assist|customer (care|service)|tech team|technical team|recovery team|resolve|rectify|recover)\b/.test(t) ||
+    /\b(get|for|need|receive|claim|request)\s+(some\s+)?(help|support)\b/.test(t);
+  if (supportWord && hasLink && !patterns.includes("support+link")) {
+    patterns.push("support+link");
+    strong = true;
+  }
+  if (/\b(click|tap|go|visit|open|use)\b[^.!?\n]{0,15}\b(here|this|link|below|site|website|page)\b/.test(t) && hasLink) {
+    patterns.push("click+link");
+  }
+
   return { matched: patterns.length > 0, strong, patterns };
 }
 

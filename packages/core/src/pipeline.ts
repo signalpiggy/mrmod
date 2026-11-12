@@ -141,7 +141,7 @@ export async function runPipeline(input: MessageInput, deps: PipelineDeps): Prom
 
   const match = evaluatePolicy(deps.rules, { signals, moderationFlagged: Boolean(moderation?.flagged), verdict }, s.globalMode);
   const sampled = !match && (deps.random ?? Math.random)() < s.sampleRate;
-  const record = Boolean(match) || sampled || wantJudge || Boolean(moderation?.flagged);
+  const record = s.logAllMessages || Boolean(match) || sampled || wantJudge || Boolean(moderation?.flagged);
 
   return {
     input,
