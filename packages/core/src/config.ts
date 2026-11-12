@@ -17,6 +17,16 @@ export const settingsSchema = z.object({
   logAllMessages: z.boolean().default(true),
   /** Draft (but don't post) a help-centre answer for questions, shown in the Message log. */
   suggestAnswers: z.boolean().default(true),
+  /** Admin guidance for answers from the knowledge base (style, length, what to prefer). Safety rules are fixed in code. */
+  answerPrompt: z
+    .string()
+    .default(
+      [
+        "Be VERY concise: at most 2 short sentences, under 300 characters.",
+        "Give the key step or fact only and let the linked article carry the detail.",
+        "Write in plain, friendly English. Reply in the language the question was asked in.",
+      ].join("\n"),
+    ),
   /** Appended to every bot answer. */
   answerFooter: z.string().default("🤖 AI-generated answer. For clarification, ping @AdminBen"),
   exemptRoleIds: z.array(z.string()).default([]),

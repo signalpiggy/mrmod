@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings, parseSettings } from "../src/config.js";
-import { formatAnswer, looksLikeQuestion } from "../src/knowledge/answer.js";
+import { answerInstructions, formatAnswer, looksLikeQuestion } from "../src/knowledge/answer.js";
 import { chunkText, isArticle, isCrawlable, normalizeUrl } from "../src/knowledge/crawl.js";
 import { DuplicateTracker, runPipeline, VerdictCache, type PipelineDeps } from "../src/pipeline.js";
 import { DEFAULT_RULES, evaluatePolicy } from "../src/policy.js";
@@ -254,5 +254,14 @@ describe("hub commands", () => {
       deleteMessageHours: 168,
     });
     expect(parseBotCommand(JSON.stringify({ type: "ban", decisionId: "7; drop", actor: "x" }))).toBeNull();
+  });
+});
+
+describe("answer prompt", () => {
+  it("keeps the safety rules and appends the admin's guidance", () => {
+    const text = answerInstructions({ answerPrompt: "Always mention the NuFi mobile app." });
+    expect(text).toContain("Never ask anyone for a seed phrase");
+    expect(text).toContain("Always mention the NuFi mobile app.");
+    expect(answerInstructions(defaultSettings)).toContain("VERY concise");
   });
 });

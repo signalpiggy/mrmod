@@ -653,6 +653,12 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
             </label>
             <div class="hint">When the AI sees a help question, it drafts the reply it would give from support.nu.fi and shows it in the Message log. Nothing is posted in Discord.</div>
           </div>
+          <label>Answer prompt</label>
+          <textarea name="answerPrompt">{s.answerPrompt}</textarea>
+          <div class="hint">
+            Guides how the bot answers from the support.nu.fi articles: length, tone, what to emphasise, topics to avoid. Built-in safety rules always apply (answer only from
+            the articles, never ask for recovery phrases, never send people to DMs or outside ticket links). Applies to suggested answers, /ask and @mentions.
+          </div>
           <label>Footer on every bot answer</label>
           <input name="answerFooter" value={s.answerFooter} />
           <label>Server rules the AI judge cites</label>
@@ -681,6 +687,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     next.logAllMessages = b.logAllMessages === "1";
     next.suggestAnswers = b.suggestAnswers === "1";
     next.answerFooter = String(b.answerFooter ?? "").trim();
+    next.answerPrompt = String(b.answerPrompt ?? "").trim().slice(0, 4000);
     next.serverRules = String(b.serverRules ?? "");
     const parsed = settingsSchema.safeParse({ ...current, ...next });
     if (!parsed.success) return c.redirect(`/settings?error=${encodeURIComponent("Not saved: " + parsed.error.issues.map((i) => i.path.join(".")).join(", "))}`);
