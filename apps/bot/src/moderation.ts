@@ -91,6 +91,19 @@ async function enforce(message: Message<true>, d: Decision, executed: string[]) 
     await message.delete();
     executed.push("delete");
   }
+  if (a.ban) {
+    const member = message.member ?? (await message.guild.members.fetch(message.author.id).catch(() => null));
+    if (member && !member.bannable) {
+      executed.push("ban skipped (member above bot role)");
+    } else {
+      await message.guild.members.ban(message.author.id, {
+        reason: `mrmod: ${d.match!.rule.name} (decision on message ${message.id})`,
+        deleteMessageSeconds: 3600,
+      });
+      executed.push("ban");
+      return; // a ban supersedes any timeout
+    }
+  }
   if (a.timeoutMinutes > 0) {
     const member = message.member ?? (await message.guild.members.fetch(message.author.id));
     if (member.moderatable) {
@@ -111,7 +124,7 @@ function describe(d: Decision): string {
 function actionText(d: Decision, executed: string[]): string {
   if (!d.match) return d.sampled ? "Allowed (random sample for review)" : "Allowed";
   const a = d.match.action;
-  const planned = [a.delete && "delete", a.timeoutMinutes && `timeout ${a.timeoutMinutes}m`, a.alert && "alert admins", a.recommendBan && "recommend ban"]
+  const planned = [a.delete && "delete", a.timeoutMinutes && `timeout ${a.timeoutMinutes}m`, a.alert && "alert admins", a.ban && "ban", a.recommendBan && "recommend ban"]
     .filter(Boolean)
     .join(", ") || "log only";
   if (d.match.mode === "shadow") return `Would: ${planned}`;
@@ -174,7 +187,7 @@ async function postAlert(client: Client, state: BotState, id: number, d: Decisio
       new ButtonBuilder().setCustomId(`act:delete:${d.input.channelId}:${d.input.messageId}:${id}`).setLabel("Delete message").setStyle(ButtonStyle.Primary),
     );
   }
-  if (d.match?.action.recommendBan) {
+  if (d.match?.action.recommendBan && !executed.includes("ban")) {
     buttons.unshift(new ButtonBuilder().setCustomId(`act:ban:${d.input.authorId}:${id}`).setLabel("Ban").setStyle(ButtonStyle.Danger));
   }
   const role = state.settings.alertRoleId;

@@ -43,8 +43,10 @@ export interface ActionPlan {
   timeoutMinutes: number;
   /** Ping the alert role in the alert channel. */
   alert: boolean;
-  /** Show a Ban button on the alert; bans are never automatic. */
+  /** Show a Ban button on the alert for a human to press. */
   recommendBan: boolean;
+  /** Ban the author automatically (and delete their last hour of messages). Only when the rule is enforced. */
+  ban?: boolean;
 }
 
 export interface PolicyRule {

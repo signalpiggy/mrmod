@@ -108,8 +108,8 @@ describe("policy", () => {
     expect(m2?.mode).toBe("enforce");
   });
 
-  it("never bans automatically", () => {
-    for (const r of DEFAULT_RULES) expect(Object.keys(r.definition.action)).not.toContain("ban");
+  it("starter rules don't ban automatically (admins opt in per rule)", () => {
+    for (const r of DEFAULT_RULES) expect(r.definition.action.ban ?? false).toBe(false);
   });
 
   it("ok verdict matches nothing", () => {
