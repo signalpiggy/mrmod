@@ -96,7 +96,7 @@ jobs:
           sleep 25
           ssh vps 'cd ~/mrmod && docker compose ps --format "table {{.Service}}\t{{.Status}}"'
           echo "--- bot ---"
-          ssh vps 'cd ~/mrmod && docker compose logs --tail 30 bot'
+          ssh vps 'cd ~/mrmod && docker compose logs --tail 80 bot'
           echo "--- hub ---"
           # The one-time setup code is printed only until the hub admin password is set.
           ssh vps 'cd ~/mrmod && docker compose logs --tail 30 hub' | tee /tmp/hub.txt
