@@ -32,6 +32,15 @@ const COOKIE = "mrmod_session";
 const SESSION_HOURS = 12;
 const PERMISSIONS = "1099511720966";
 
+/** Host part of an Origin header; null for "null" or anything unparsable (treated as cross-site). */
+export function originHost(origin: string): string | null {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return null;
+  }
+}
+
 function ip(c: Context): string {
   return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "local";
 }
@@ -44,13 +53,19 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     if (c.req.method === "POST") {
       const origin = c.req.header("origin");
       const host = c.req.header("x-forwarded-host") ?? c.req.header("host");
-      if (origin && host && new URL(origin).host !== host) return c.text("Cross-site request blocked", 403);
+      if (origin && host && originHost(origin) !== host) return c.text("Cross-site request blocked", 403);
     }
     c.header("X-Frame-Options", "DENY");
     c.header("X-Content-Type-Options", "nosniff");
-    c.header("Referrer-Policy", "no-referrer");
+    // "no-referrer" makes browsers send `Origin: null` on form posts, which breaks the check above.
+    c.header("Referrer-Policy", "same-origin");
     c.header("Cache-Control", "no-store");
     await next();
+  });
+
+  app.onError((err, c) => {
+    console.error(`${c.req.method} ${c.req.path} failed:`, err);
+    return c.text("Something went wrong; it has been logged on the server.", 500);
   });
 
   app.get("/healthz", (c) => c.text("ok"));
