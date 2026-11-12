@@ -39,15 +39,16 @@ services:
       db: { condition: service_healthy }
     logging: *logging
 
-  # HTTPS for the hub with an automatic Let's Encrypt certificate for HUB_DOMAIN.
+  # HTTPS for the hub on port 8443 (80/443 belong to the site already on this VPS).
+  # Uses Caddy's own certificate authority, so browsers show a one-time warning.
   caddy:
     image: caddy:2
     restart: unless-stopped
-    ports: ["80:80", "443:443"]
+    ports: ["${HUB_PORT:-8443}:8443"]
     environment:
       HUB_DOMAIN: ${HUB_DOMAIN:?set HUB_DOMAIN}
-    command: caddy reverse-proxy --from ${HUB_DOMAIN} --to hub:3000
     volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on: [hub]
     logging: *logging

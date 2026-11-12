@@ -85,7 +85,7 @@ jobs:
       - name: Upload images and compose file
         run: |
           docker save mrmod-bot:${IMAGE_TAG} mrmod-hub:${IMAGE_TAG} | gzip | ssh vps 'gunzip | docker load'
-          scp docker-compose.yml vps:~/mrmod/docker-compose.yml
+          scp docker-compose.yml deploy/Caddyfile vps:~/mrmod/
 
       - name: Restart stack
         run: |
@@ -100,7 +100,7 @@ jobs:
           echo "--- hub ---"
           # The one-time setup code is printed only until the hub admin password is set.
           ssh vps 'cd ~/mrmod && docker compose logs --tail 30 hub' | tee /tmp/hub.txt
-          echo "Hub: https://$(ssh vps 'grep ^HUB_DOMAIN= ~/mrmod/.env | cut -d= -f2')"
+          echo "Hub: https://$(ssh vps 'grep ^HUB_DOMAIN= ~/mrmod/.env | cut -d= -f2'):8443"
           for s in bot hub caddy db; do
             ssh vps "cd ~/mrmod && docker compose ps --status running --services" | grep -qx "$s" || { echo "::error::$s is not running"; exit 1; }
           done

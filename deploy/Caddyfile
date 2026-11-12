@@ -1,0 +1,4 @@
+https://{$HUB_DOMAIN}:8443 {
+	tls internal
+	reverse_proxy hub:3000
+}

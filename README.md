@@ -16,7 +16,7 @@ AI moderation and help bot for the NuFi Discord.
 | `apps/bot` | discord.js v14 process: message handling, enforcement, mod log, alerts, slash commands |
 | `apps/hub` | Password-protected web hub: connection keys, overview, decisions review, rules, settings, knowledge base, audit log |
 | `.github/workflows/ci.yml` | Tests on every PR; on merge to `main`, builds the images and deploys to the VPS |
-| `docker-compose.yml` | Production stack: Postgres 16 + pgvector, bot, hub, Caddy (HTTPS) |
+| `docker-compose.yml` | Production stack: Postgres 16 + pgvector, bot, hub, Caddy (HTTPS on 8443) |
 
 
 ## Discord commands

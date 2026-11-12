@@ -27,11 +27,13 @@ elif [ -n "$HUB_DOMAIN_INPUT" ] && ! grep -q "^HUB_DOMAIN=${HUB_DOMAIN_INPUT}$" 
   echo "Updated HUB_DOMAIN to ${HUB_DOMAIN_INPUT}."
 fi
 
-# Ports 80/443 must be free for the hub's HTTPS proxy (or already ours).
+# The hub's HTTPS proxy needs port 8443 (80/443 are used by the existing site).
 if ! docker compose ps --services --status running 2>/dev/null | grep -qx caddy; then
-  if ss -ltnH '( sport = :80 or sport = :443 )' | grep -q .; then
-    echo "::error::Ports 80/443 are already used by another program on the VPS:"
-    ss -ltnpH '( sport = :80 or sport = :443 )' || true
+  if ss -ltnH '( sport = :8443 )' | grep -q .; then
+    echo "::error::Port 8443 is already used by another program on the VPS:"
+    ss -ltnpH '( sport = :8443 )' || true
     exit 1
   fi
 fi
+# Open 8443 if ufw is active (Hostinger's panel firewall, if enabled, needs it too).
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then ufw allow 8443/tcp >/dev/null; fi

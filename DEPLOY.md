@@ -10,7 +10,7 @@ Merging to `main` runs the tests, builds the bot and hub images on GitHub's runn
 | Postgres password, encryption key, hub session key | `~/mrmod/.env` on the VPS, generated there on first deploy. Never in GitHub. |
 | SSH key used to deploy | GitHub repository secrets (`VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, optional `VPS_PORT`, `VPS_HOST_KEY`). |
 
-Optional repository **variable** `HUB_DOMAIN` sets the hub's address; otherwise the VPS hostname is used (e.g. `srvNNNN.hstgr.cloud`). Caddy gets an HTTPS certificate for it automatically; ports 80 and 443 must be free on the VPS.
+Optional repository **variable** `HUB_DOMAIN` sets the hub's address; otherwise the VPS hostname is used (e.g. `srvNNNN.hstgr.cloud`). The hub is served at `https://HUB_DOMAIN:8443` because ports 80/443 belong to the existing site. Caddy uses its own certificate, so the browser warns once; accept it for this address. (A subdomain behind the site's web server can replace this later.)
 
 ## First-time setup
 
