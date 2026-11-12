@@ -134,7 +134,9 @@ describe("pipeline", () => {
   });
 
   it("logs every message when logAllMessages is on", async () => {
-    const d = await runPipeline(msg("gm"), base());
+    const deps = base();
+    deps.judge = async () => ({ verdict: { verdict: "ok", confidence: 0.99, rule_broken: null, reason: "greeting", source: "llm" }, model: "m", latencyMs: 1, inputTokens: 1, outputTokens: 1 });
+    const d = await runPipeline(msg("gm"), deps);
     expect(d?.record).toBe(true);
     expect(d?.match).toBeNull();
   });
