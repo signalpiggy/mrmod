@@ -15,6 +15,10 @@ export const settingsSchema = z.object({
   judgeAll: z.boolean().default(true),
   /** Record every message (and post each to the mod log), not just suspicious ones. On while testing. */
   logAllMessages: z.boolean().default(true),
+  /** Draft (but don't post) a help-centre answer for questions, shown in the Message log. */
+  suggestAnswers: z.boolean().default(true),
+  /** Appended to every bot answer. */
+  answerFooter: z.string().default("🤖 AI-generated answer. For clarification, ping @AdminBen"),
   exemptRoleIds: z.array(z.string()).default([]),
   exemptChannelIds: z.array(z.string()).default([]),
   /** Members with these roles are only judged if a signal fires. */

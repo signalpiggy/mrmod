@@ -16,6 +16,8 @@ export interface JudgeVerdict {
   confidence: number;
   rule_broken: string | null;
   reason: string;
+  /** The judge thinks this is a genuine help question (used for suggested answers). */
+  is_question?: boolean;
   /** "llm" when the model judged it, "heuristic" when we fell back to patterns. */
   source?: "llm" | "heuristic";
 }
@@ -87,4 +89,15 @@ export interface MessageInput {
   mentionsEveryone: boolean;
   /** Up to 3 previous messages from this author in this channel, oldest first. */
   recentAuthorMessages: string[];
+}
+
+/** What the bot would have replied to a question (shadow), stored on the decision. */
+export interface SuggestedAnswer {
+  answerable: boolean;
+  /** Full Discord-formatted reply, including links and footer. */
+  text: string;
+  sources: { url: string; title: string }[];
+  model?: string;
+  latencyMs?: number;
+  error?: string;
 }

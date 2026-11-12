@@ -15,6 +15,13 @@
       "when": 1794506347513,
       "tag": "0001_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794510264663,
+      "tag": "0002_suggested_answer",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings, parseSettings } from "../src/config.js";
+import { formatAnswer, looksLikeQuestion } from "../src/knowledge/answer.js";
 import { chunkText, isArticle, isCrawlable, normalizeUrl } from "../src/knowledge/crawl.js";
 import { DuplicateTracker, runPipeline, VerdictCache, type PipelineDeps } from "../src/pipeline.js";
 import { DEFAULT_RULES, evaluatePolicy } from "../src/policy.js";
@@ -219,5 +220,25 @@ describe("knowledge crawl helpers", () => {
     const chunks = chunkText("T", Array.from({ length: 20 }, (_, i) => `para ${i} `.repeat(30)).join("\n\n"), 500);
     expect(chunks.length).toBeGreaterThan(5);
     for (const c of chunks) expect(c.startsWith("T\n\n")).toBe(true);
+  });
+});
+
+describe("suggested answers", () => {
+  it("formats a concise answer with direct article links and the AI notice", () => {
+    const out = formatAnswer(
+      { answerable: true, text: "Go to Settings > Export.", sources: [{ url: "https://support.nu.fi/support/solutions/articles/1-export", title: "Export" }] },
+      defaultSettings,
+    );
+    expect(out).toContain("<https://support.nu.fi/support/solutions/articles/1-export>");
+    expect(out).toContain("AI-generated");
+    expect(out).toContain("For clarification, ping @AdminBen");
+  });
+  it("points to the help centre when nothing was found", () => {
+    expect(formatAnswer({ answerable: false, text: "I couldn't find that.", sources: [] }, defaultSettings)).toContain("https://support.nu.fi/support/solutions");
+  });
+  it("spots questions without the judge", () => {
+    expect(looksLikeQuestion("how do I export my wallet to Ledger")).toBe(true);
+    expect(looksLikeQuestion("my rewards are missing?")).toBe(true);
+    expect(looksLikeQuestion("gm everyone")).toBe(false);
   });
 });
