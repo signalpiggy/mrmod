@@ -148,6 +148,7 @@ const I = (d: string) => (
 const NAV: [string, string, string][] = [
   ["/", "Home", "M4 13h6V4H4zM14 20h6v-9h-6zM14 4h6v3h-6zM4 20h6v-3H4z"],
   ["/decisions", "Log", "M4 6h16M4 12h16M4 18h10"],
+  ["/backtest", "Backtest", "M9 3h6M10 3v6l-6 10a1.5 1.5 0 0 0 1.3 2h13.4a1.5 1.5 0 0 0 1.3-2l-6-10V3M7 15h10"],
   ["/rules", "Rules", "M12 3 4 6v6c0 4.5 3.2 8 8 9 4.8-1 8-4.5 8-9V6z"],
   ["/knowledge", "Help KB", "M5 4h11l3 3v13H5zM9 9h6M9 13h6M9 17h4"],
   ["/settings", "Settings", "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4"],

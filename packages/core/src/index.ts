@@ -9,3 +9,4 @@ export * from "./db/store.js";
 export * from "./knowledge/crawl.js";
 export * from "./knowledge/answer.js";
 export * from "./secrets.js";
+export * from "./backtest.js";

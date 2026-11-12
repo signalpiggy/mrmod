@@ -3,6 +3,7 @@ import {
   configureOpenAI,
   crawlKnowledgeBase,
   loadSecrets,
+  parseBacktestCommand,
   parseBotCommand,
   runMigrations,
   seedRules,
@@ -10,6 +11,7 @@ import {
   type SecretValues,
 } from "@mrmod/core";
 import { Client, Events, GatewayIntentBits, Partials, REST, Routes } from "discord.js";
+import { runBacktest } from "./backtest.js";
 import { answerMention, COMMANDS, handleInteraction } from "./interactions.js";
 import { log } from "./log.js";
 import { handleMessage, runHubCommand } from "./moderation.js";
@@ -125,6 +127,8 @@ async function main() {
   setInterval(crawl, Math.max(1, state.settings.crawlIntervalHours) * 3_600_000);
   await state.sql.listen("mrmod_cmd", (payload) => {
     if (payload === "recrawl") return void crawl();
+    const backtest = parseBacktestCommand(payload);
+    if (backtest) return void runBacktest(state, client, guildId, backtest);
     const cmd = parseBotCommand(payload);
     if (cmd) void runHubCommand(state, client, guildId, cmd);
   });
