@@ -79,6 +79,13 @@ export interface BacktestRun {
   status: "running" | "done" | "error";
   requestedBy: string;
   requested: number;
+  /** Date range asked for (ISO), null = open-ended. */
+  from?: string | null;
+  to?: string | null;
+  /** The page limit cut reading short, so older qualifying messages may be missing. */
+  truncated?: boolean;
+  /** Timezone offset (minutes, as getTimezoneOffset) of whoever started the run. */
+  tz?: number;
   startedAt: string;
   finishedAt?: string;
   /** Live progress line for the hub. */
@@ -94,17 +101,36 @@ export interface BacktestRun {
 }
 
 /** Hub -> bot: start a backtest. */
-export type BacktestCommand = { type: "backtest"; count: number; actor: string };
+export const BACKTEST_COUNTS = [100, 300, 500, 1000, 2000] as const;
+export const BACKTEST_MAX_COUNT = 2000;
+
+/** Hub -> bot: start a backtest. Takes the newest `count` starters, optionally only those sent between `from` and `to` (ISO times). */
+export type BacktestCommand = { type: "backtest"; count: number; from: string | null; to: string | null; actor: string; /** Viewer's getTimezoneOffset(), for showing dates. */ tz: number };
+
+function isoOrNull(v: unknown): string | null {
+  if (typeof v !== "string" || !v) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
 
 export function parseBacktestCommand(payload: string): BacktestCommand | null {
   try {
     const c = JSON.parse(payload) as Partial<BacktestCommand>;
     if (c.type !== "backtest") return null;
-    const count = Math.min(1000, Math.max(1, Math.floor(Number(c.count) || BACKTEST_DEFAULT_COUNT)));
-    return { type: "backtest", count, actor: typeof c.actor === "string" ? c.actor.slice(0, 100) : "hub" };
+    const count = Math.min(BACKTEST_MAX_COUNT, Math.max(1, Math.floor(Number(c.count) || BACKTEST_DEFAULT_COUNT)));
+    let from = isoOrNull(c.from);
+    let to = isoOrNull(c.to);
+    if (from && to && from > to) [from, to] = [to, from];
+    const tz = Math.max(-840, Math.min(840, Math.round(Number(c.tz) || 0)));
+    return { type: "backtest", count, from, to, actor: typeof c.actor === "string" ? c.actor.slice(0, 100) : "hub", tz };
   } catch {
     return null;
   }
+}
+
+/** Discord snowflake for a time: messages fetched `before` it were sent before that time. */
+export function snowflakeAt(ms: number): string {
+  return ((BigInt(Math.floor(ms)) - 1420070400000n) << 22n).toString();
 }
 
 /**
@@ -241,4 +267,122 @@ export function summarizeBacktest(results: BacktestResult[]) {
     allow: results.filter((r) => r.outcome === "allow").length,
     skip: results.filter((r) => r.outcome === "skip").length,
   };
+}
+
+/** A channel to read: `fetch` returns up to 100 messages sent before the `before` message id (or the newest), newest first. */
+export interface HistorySource<K> {
+  key: K;
+  fetch(before: string | undefined): Promise<HistoryMessage[]>;
+}
+
+export interface CollectOptions {
+  count: number;
+  /** Only starters sent at or after this time (ms). */
+  from?: number | null;
+  /** Only starters sent before this time (ms). */
+  to?: number | null;
+  /** Extra filter for which messages can be replayed (bots, empty, system types...). */
+  eligible?: (m: HistoryMessage) => boolean;
+  /** Safety stop on total history pages read. */
+  maxPages?: number;
+  onPage?: (stats: { pages: number; messages: number; starters: number; channel: unknown }) => void | Promise<void>;
+}
+
+export interface Collected<K> {
+  picked: { key: K; message: HistoryMessage; history: HistoryMessage[] }[];
+  pages: number;
+  messages: number;
+  starters: number;
+  channelsRead: number;
+  /** True if the page limit cut the read short (results may then miss older messages). */
+  truncated: boolean;
+}
+
+/**
+ * Finds the newest `count` conversation starters across all channels.
+ * Reads all channels backwards in step: it always fetches the next page of whichever channel is
+ * read least far back, so everything newer than the shared "frontier" has been seen in every channel.
+ * It stops once `count` starters sit above that frontier (or it has passed `from`).
+ */
+export async function collectLatestStarters<K>(sources: HistorySource<K>[], o: CollectOptions): Promise<Collected<K>> {
+  const maxPages = o.maxPages ?? 3000;
+  const from = o.from ?? -Infinity;
+  const to = o.to ?? Infinity;
+  type St = { src: HistorySource<K>; asc: HistoryMessage[]; frontier: number; before?: string; done: boolean; settledUpTo: number; lo: number };
+  const chans: St[] = sources.map((src) => ({
+    src,
+    asc: [],
+    frontier: to,
+    before: Number.isFinite(to) ? snowflakeAt(to) : undefined,
+    done: false,
+    settledUpTo: 0,
+    lo: 0,
+  }));
+  const starters: { at: number; key: K; message: HistoryMessage; st: St }[] = [];
+  let pages = 0;
+  let messages = 0;
+  let truncated = false;
+
+  // Classify messages whose 10-minute lookback is fully read. Messages are kept oldest first; newly fetched pages go in front.
+  const settle = (st: St) => {
+    const limit = st.done ? -Infinity : st.frontier + STARTER_GAP_MS;
+    // asc is oldest first; anything at index >= settledUpTo from the end has been handled. Walk from newest unsettled downwards.
+    for (let i = st.asc.length - 1 - st.settledUpTo; i >= 0; i--) {
+      const m = st.asc[i]!;
+      const t = m.createdAt.getTime();
+      if (t < limit) break;
+      st.settledUpTo++;
+      if (t < from || t >= to) continue;
+      if (o.eligible && !o.eligible(m)) continue;
+      let j = i - 1;
+      const window: HistoryMessage[] = [];
+      while (j >= 0 && st.asc[j]!.createdAt.getTime() >= t - STARTER_GAP_MS) window.push(st.asc[j--]!);
+      if (isConversationStarter(m, window).starter) starters.push({ at: t, key: st.src.key, message: m, st });
+    }
+  };
+
+  for (;;) {
+    const open = chans.filter((c) => !c.done);
+    // The shared frontier: every channel has been read back to at least here.
+    const frontier = open.length ? Math.max(...open.map((c) => c.frontier)) : -Infinity;
+    if (!open.length) break;
+    if (starters.filter((s) => s.at >= frontier + STARTER_GAP_MS).length >= o.count) break;
+    if (pages >= maxPages) {
+      truncated = true;
+      break;
+    }
+    const st = open.reduce((a, b) => (b.frontier > a.frontier ? b : a));
+    let page: HistoryMessage[];
+    try {
+      page = await st.src.fetch(st.before);
+    } catch {
+      st.done = true; // unreadable channel
+      settle(st);
+      continue;
+    }
+    pages++;
+    messages += page.length;
+    if (page.length) {
+      const asc = [...page].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      st.asc = [...asc, ...st.asc];
+      st.before = asc[0]!.id;
+      st.frontier = asc[0]!.createdAt.getTime();
+    }
+    if (page.length < 100) st.done = true;
+    if (st.frontier < from - STARTER_GAP_MS) st.done = true;
+    settle(st);
+    await o.onPage?.({ pages, messages, starters: starters.length, channel: st.src.key });
+  }
+
+  const open = chans.filter((c) => !c.done);
+  const frontier = open.length ? Math.max(...open.map((c) => c.frontier)) : -Infinity;
+  const picked = starters
+    .filter((s) => truncated || s.at >= frontier + STARTER_GAP_MS || !open.length)
+    .sort((a, b) => b.at - a.at)
+    .slice(0, o.count)
+    .map((s) => {
+      const i = s.st.asc.indexOf(s.message);
+      return { key: s.key, message: s.message, history: s.st.asc.slice(Math.max(0, i - 20), i) };
+    });
+  return { picked, pages, messages, starters: starters.length, channelsRead: chans.filter((c) => c.asc.length).length, truncated };
 }
