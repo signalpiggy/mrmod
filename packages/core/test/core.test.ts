@@ -242,3 +242,17 @@ describe("suggested answers", () => {
     expect(looksLikeQuestion("gm everyone")).toBe(false);
   });
 });
+
+describe("hub commands", () => {
+  it("parses a ban command and clamps message deletion", async () => {
+    const { parseBotCommand } = await import("../src/db/store.js");
+    expect(parseBotCommand("recrawl")).toBeNull();
+    expect(parseBotCommand(JSON.stringify({ type: "ban", decisionId: 7, actor: "hub admin", deleteMessageHours: 9999 }))).toEqual({
+      type: "ban",
+      decisionId: 7,
+      actor: "hub admin",
+      deleteMessageHours: 168,
+    });
+    expect(parseBotCommand(JSON.stringify({ type: "ban", decisionId: "7; drop", actor: "x" }))).toBeNull();
+  });
+});

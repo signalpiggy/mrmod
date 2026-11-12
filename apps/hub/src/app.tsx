@@ -1,5 +1,6 @@
 import {
   audit,
+  getDecision,
   getRuntime,
   loadRules,
   loadSecrets,
@@ -8,6 +9,7 @@ import {
   saveSetting,
   schema,
   secretStatus,
+  sendBotCommand,
   SECRET_KEYS,
   setSecret,
   settingsSchema,
@@ -299,7 +301,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     const ruleRows = await loadRules(db);
     const settings = await loadSettings(db);
     return c.html(
-      <Layout title="Message log" path="/decisions">
+      <Layout title="Message log" path="/decisions" flash={c.req.query("flash") ?? undefined}>
         <h1>Message log</h1>
         <p class="hint">
           {settings.logAllMessages ? "Every message is logged (turn off in Settings)." : "Suspicious messages and a random sample are logged."} Newest first;
@@ -357,7 +359,14 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                   </a>
                 </td>
                 <td class="msg">
-                  <b>{d.authorTag}</b>
+                  <b>{d.authorTag}</b>{" "}
+                  {d.executed.some((e) => e === "ban" || e.startsWith("ban (")) ? (
+                    <span class="pill badc">banned</span>
+                  ) : (
+                    <a class="pill badc" href={`/decisions/${d.id}/ban`} style="text-decoration:none">
+                      Ban user
+                    </a>
+                  )}
                   {"\n"}
                   {d.content ?? "(text removed by retention)"}
                   <div class="hint">
@@ -405,6 +414,60 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
           </table>
         </div>
       </Layout>,
+    );
+  });
+
+  // ---------- ban from the message log (confirm page, then the bot does it in Discord) ----------
+  app.get("/decisions/:id/ban", async (c) => {
+    const d = await getDecision(db, Number(c.req.param("id")));
+    if (!d) return c.notFound();
+    return c.html(
+      <Layout title="Ban user" path="/decisions">
+        <h1>Ban {d.authorTag ?? d.authorId}?</h1>
+        <div class="card">
+          <p>
+            The bot will ban <b>{d.authorTag ?? "this user"}</b> (ID {d.authorId}) from the Discord server. They can't rejoin unless someone unbans them in
+            Server Settings → Bans.
+          </p>
+          <div class="msg card" style="max-width:none">
+            <span class="hint">
+              #{d.channelName ?? "channel"} · {ago(d.createdAt)}
+            </span>
+            {"\n"}
+            {d.content ?? "(text removed by retention)"}
+          </div>
+          <form method="post" action={`/decisions/${d.id}/ban`}>
+            <label>Also delete their recent messages</label>
+            <select name="deleteMessageHours" style="max-width:280px">
+              <option value="0">Don't delete any</option>
+              <option value="1">Last hour</option>
+              <option value="24" selected>
+                Last 24 hours
+              </option>
+              <option value="168">Last 7 days</option>
+            </select>
+            <p class="row">
+              <button style="background:var(--bad);border-color:var(--bad)">Yes, ban {d.authorTag ?? "user"}</button>
+              <a href="/decisions">Cancel</a>
+            </p>
+          </form>
+        </div>
+      </Layout>,
+    );
+  });
+
+  app.post("/decisions/:id/ban", async (c) => {
+    const d = await getDecision(db, Number(c.req.param("id")));
+    if (!d) return c.notFound();
+    const requested = Number((await c.req.parseBody()).deleteMessageHours);
+    const hours = [0, 1, 24, 168].includes(requested) ? requested : 0;
+    const bot = await getRuntime<{ status: string }>(db, "bot");
+    const fresh = bot?.value.status === "online" && Date.now() - bot.updatedAt.getTime() < 3 * 60_000;
+    if (!fresh) return c.redirect(`/decisions?flash=${encodeURIComponent("Not sent: the bot isn't online right now, so nobody was banned. Check the Connection page.")}`);
+    await audit(db, c.get("actor"), "admin", "member.ban.request", d.authorId, { decisionId: d.id, deleteMessageHours: hours });
+    await sendBotCommand(db, { type: "ban", decisionId: d.id, actor: "hub admin", deleteMessageHours: hours });
+    return c.redirect(
+      `/decisions?flash=${encodeURIComponent(`Ban sent to the bot for ${d.authorTag ?? d.authorId}. Refresh in a few seconds: the row will show "banned", or the error if Discord refused.`)}`,
     );
   });
 
