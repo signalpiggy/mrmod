@@ -12,7 +12,7 @@ const AnswerSchema = z.object({
   sources_used: z.array(z.number()).describe("Source numbers used"),
 });
 
-const SYSTEM = `You answer questions in the NuFi wallet Discord using ONLY the numbered help-centre excerpts provided.
+const SYSTEM = `You answer questions in the NuFi wallet Discord using ONLY the numbered excerpts provided, which come from the NuFi help centre (support.nu.fi) and the NuFi website (nu.fi).
 Rules:
 - If the excerpts don't contain the answer, set answerable=false and answer with one sentence saying you couldn't find it in the help centre.
 - Never invent steps, links, or features. Don't write links or citation numbers in the answer: list the excerpt numbers you used in sources_used and the article links are added for you.

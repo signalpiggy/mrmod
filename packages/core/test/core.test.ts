@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings, parseSettings } from "../src/config.js";
 import { answerInstructions, formatAnswer, looksLikeQuestion } from "../src/knowledge/answer.js";
-import { chunkText, isArticle, isCrawlable, normalizeUrl } from "../src/knowledge/crawl.js";
+import { chunkText, extractArticle, isArticle, isCrawlable, normalizeUrl } from "../src/knowledge/crawl.js";
 import { DuplicateTracker, runPipeline, VerdictCache, type PipelineDeps } from "../src/pipeline.js";
 import { DEFAULT_RULES, evaluatePolicy } from "../src/policy.js";
 import { computeSignals, detectSupportScam, extractDomains, riskScore } from "../src/signals.js";
@@ -263,5 +263,31 @@ describe("answer prompt", () => {
     expect(text).toContain("Never ask anyone for a seed phrase");
     expect(text).toContain("Always mention the NuFi mobile app.");
     expect(answerInstructions(defaultSettings)).toContain("VERY concise");
+  });
+});
+
+describe("crawling nu.fi as well as the help centre", () => {
+  const hosts = ["support.nu.fi", "nu.fi"];
+  it("follows normal nu.fi pages but not assets", () => {
+    expect(isCrawlable(new URL("https://nu.fi/chains/support"), hosts)).toBe(true);
+    expect(isCrawlable(new URL("https://nu.fi/features/security"), hosts)).toBe(true);
+    expect(isCrawlable(new URL("https://nu.fi/_next/static/chunk.js"), hosts)).toBe(false);
+    expect(isCrawlable(new URL("https://nu.fi/images/twitter-card.png"), hosts)).toBe(false);
+    expect(isCrawlable(new URL("https://wallet.nu.fi/"), hosts)).toBe(false);
+  });
+  it("stores nu.fi pages but not help-centre folder listings", () => {
+    expect(isArticle(new URL("https://nu.fi/chains/support"))).toBe(true);
+    expect(isArticle(new URL("https://support.nu.fi/support/solutions/folders/1"))).toBe(false);
+  });
+  it("extracts page text with table cells kept apart and site chrome removed", () => {
+    const html = `<html><head><title>NuFi</title></head><body><nav>Menu Home</nav><main><h1>Supported Blockchains</h1>
+      <p>NuFi supports many chains.</p><table><tr><th>Chain</th><th>Staking</th></tr><tr><td>Bitcoin</td><td>No</td></tr><tr><td>Cardano</td><td>Yes</td></tr></table></main>
+      <footer>Newsletter</footer></body></html>`;
+    const a = extractArticle(html, "https://nu.fi/chains/support");
+    expect(a.title).toBe("Supported Blockchains");
+    expect(a.text).toContain("Bitcoin | No");
+    expect(a.text).toContain("Cardano | Yes");
+    expect(a.text).not.toContain("Newsletter");
+    expect(a.text).not.toContain("Menu");
   });
 });
