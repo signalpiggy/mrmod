@@ -10,3 +10,4 @@ export * from "./knowledge/crawl.js";
 export * from "./knowledge/answer.js";
 export * from "./knowledge/special.js";
 export * from "./secrets.js";
+export * from "./backtest.js";

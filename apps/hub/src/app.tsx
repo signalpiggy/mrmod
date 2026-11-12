@@ -24,6 +24,7 @@ import { and, count, desc, eq, isNotNull, isNull, sql as dsql } from "drizzle-or
 import { Hono, type Context } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import { checkPassword, checkSetupCode, getAdmin, setPassword, tooManyAttempts, validPassword } from "./auth.js";
+import { registerBacktest } from "./backtest.js";
 import { ago, FONTS, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
 import { kindOf, LOG_CSS, LOG_JS, prettyVerdict, TABS } from "./logview.js";
 
@@ -594,6 +595,9 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     const next = String(body.next ?? "");
     return c.redirect(/^\d+$/.test(next) ? `${back}#m${next}` : back);
   });
+
+  // ---------- backtesting ----------
+  registerBacktest(app, db);
 
   // ---------- rules ----------
   app.get("/rules", async (c) => {
