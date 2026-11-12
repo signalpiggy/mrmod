@@ -1,0 +1,57 @@
+# Production stack on the VPS. ~/mrmod/.env is created on the VPS by the first deploy
+# (random POSTGRES_PASSWORD, SECRETS_KEY, HUB_SESSION_SECRET) and never leaves it.
+# Discord and OpenAI credentials are entered in the hub and stored encrypted in Postgres.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mrmod
+      POSTGRES_DB: mrmod
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mrmod"]
+      interval: 5s
+      retries: 20
+
+  bot:
+    image: mrmod-bot:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://mrmod:${POSTGRES_PASSWORD}@db:5432/mrmod
+      SECRETS_KEY: ${SECRETS_KEY:?set SECRETS_KEY}
+    depends_on:
+      db: { condition: service_healthy }
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  hub:
+    image: mrmod-hub:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://mrmod:${POSTGRES_PASSWORD}@db:5432/mrmod
+      SECRETS_KEY: ${SECRETS_KEY:?set SECRETS_KEY}
+      HUB_SESSION_SECRET: ${HUB_SESSION_SECRET:?set HUB_SESSION_SECRET}
+    depends_on:
+      db: { condition: service_healthy }
+    logging: *logging
+
+  # HTTPS for the hub with an automatic Let's Encrypt certificate for HUB_DOMAIN.
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      HUB_DOMAIN: ${HUB_DOMAIN:?set HUB_DOMAIN}
+    command: caddy reverse-proxy --from ${HUB_DOMAIN} --to hub:3000
+    volumes:
+      - caddy_data:/data
+    depends_on: [hub]
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:

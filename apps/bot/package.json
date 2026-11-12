@@ -1,0 +1,19 @@
+{
+  "name": "@mrmod/bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --env-file=../../.env --watch dist/index.js",
+    "start": "node dist/index.js",
+    "test": "echo 'bot: no unit tests (logic lives in @mrmod/core)'"
+  },
+  "dependencies": {
+    "@mrmod/core": "workspace:*",
+    "discord.js": "^14.28.1",
+    "postgres": "^4.1.1"
+  }
+}

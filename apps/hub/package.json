@@ -1,0 +1,19 @@
+{
+  "name": "@mrmod/hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "echo 'hub: covered by smoke checks'"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "@mrmod/core": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.18"
+  }
+}
