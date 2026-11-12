@@ -24,6 +24,8 @@ button.ghost{background:transparent;color:var(--accent)}button.small{padding:3px
 .msg{white-space:pre-wrap;word-break:break-word;max-width:420px}
 .flash{padding:10px 14px;border-radius:8px;margin-bottom:16px;background:var(--panel);border:1px solid var(--accent)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.suggest{margin-top:8px;padding:8px 10px;border-left:3px solid var(--accent);background:var(--bg);border-radius:6px;font-size:13px}
+.suggest .k{color:var(--accent);font-weight:600;font-size:12px}
 `;
 
 const NAV = [
@@ -81,3 +83,29 @@ export function ago(d: Date | string | null | undefined): string {
   if (s < 129600) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+
+/** Renders text with bare/angle-bracketed URLs as links, the way Discord shows them. */
+const Linked: FC<{ text: string }> = ({ text }) => (
+  <>
+    {text.split(/(<?https?:\/\/[^\s>]+>?)/g).map((part) => {
+      const url = part.replace(/^<|>$/g, "");
+      return /^https?:\/\//.test(url) ? (
+        <a href={url} target="_blank" rel="noreferrer">
+          {url}
+        </a>
+      ) : (
+        part.replace(/^-# /gm, "")
+      );
+    })}
+  </>
+);
+
+export const SuggestedAnswerBox: FC<{ a: { answerable: boolean; text: string; error?: string; latencyMs?: number } }> = ({ a }) => (
+  <div class="suggest">
+    <div class="k">
+      Suggested answer (shadow, not posted){a.answerable ? "" : " · not found in help centre"}
+      {a.latencyMs ? ` · ${(a.latencyMs / 1000).toFixed(1)}s` : ""}
+    </div>
+    {a.error ? <span class="badc">Couldn't draft: {a.error}</span> : <Linked text={a.text} />}
+  </div>
+);

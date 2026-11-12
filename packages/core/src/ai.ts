@@ -39,6 +39,7 @@ const VerdictSchema = z.object({
   confidence: z.number().describe("0 to 1"),
   rule_broken: z.string().nullable().describe("Rule id like R1, or null"),
   reason: z.string().describe("One short sentence for moderators"),
+  is_question: z.boolean().describe("true if the message genuinely asks for help or information about NuFi, the wallet, staking, or crypto that a help-centre article could answer"),
 });
 
 export const JUDGE_SYSTEM_PROMPT = `You are a content classifier for a Discord community about the NuFi crypto wallet.

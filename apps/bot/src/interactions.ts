@@ -1,5 +1,6 @@
 import {
   answerQuestion,
+  formatAnswer,
   audit,
   saveSetting,
   crawlKnowledgeBase,
@@ -83,19 +84,12 @@ export async function handleInteraction(state: BotState, i: Interaction) {
   }
 }
 
-export function formatAnswer(a: { answerable: boolean; text: string; sources: { url: string; title: string }[] }): string {
-  let out = a.text.slice(0, 1700);
-  if (a.sources.length) out += "\n\n" + a.sources.map((s, n) => `[${n + 1}] [${s.title}](<${s.url}>)`).join("\n");
-  out += "\n-# Answered from the NuFi help centre. NuFi staff will never DM you first or ask for your recovery phrase.";
-  return out;
-}
-
 async function ask(state: BotState, i: ChatInputCommandInteraction) {
   if (rateLimited(i.user.id)) return i.reply({ content: "You're asking quickly; try again in a minute.", flags: ephemeral });
   const q = i.options.getString("question", true);
   await i.deferReply();
   const a = await answerQuestion(state.db, state.settings, q, { userId: i.user.id, channelId: i.channelId });
-  await i.editReply({ content: formatAnswer(a), allowedMentions: { parse: [] } });
+  await i.editReply({ content: formatAnswer(a, state.settings), allowedMentions: { parse: [] } });
 }
 
 export async function answerMention(state: BotState, message: Message<true>) {
@@ -106,7 +100,7 @@ export async function answerMention(state: BotState, message: Message<true>) {
   if (q.length < 3) return;
   await message.channel.sendTyping().catch(() => {});
   const a = await answerQuestion(state.db, s, q, { userId: message.author.id, channelId: message.channelId });
-  await message.reply({ content: formatAnswer(a), allowedMentions: { parse: [], repliedUser: true } });
+  await message.reply({ content: formatAnswer(a, state.settings), allowedMentions: { parse: [], repliedUser: true } });
 }
 
 async function modbot(state: BotState, i: ChatInputCommandInteraction) {

@@ -2,7 +2,7 @@ import { and, desc, eq, gte, isNotNull, lt, sql as dsql } from "drizzle-orm";
 import { parseSettings, type Settings } from "../config.js";
 import type { Decision } from "../pipeline.js";
 import { DEFAULT_RULES } from "../policy.js";
-import type { RuleRow } from "../types.js";
+import type { RuleRow, SuggestedAnswer } from "../types.js";
 import type { DB } from "./client.js";
 import { auditLog, decisions, rules, settings } from "./schema.js";
 
@@ -83,6 +83,10 @@ export async function insertDecision(db: DB, d: Decision, executed: string[], er
     .onConflictDoNothing()
     .returning({ id: decisions.id });
   return rows[0]?.id ?? null;
+}
+
+export async function setSuggestedAnswer(db: DB, id: number, suggestedAnswer: SuggestedAnswer) {
+  await db.update(decisions).set({ suggestedAnswer }).where(eq(decisions.id, id));
 }
 
 export async function setModlogMessage(db: DB, id: number, modlogMessageId: string) {

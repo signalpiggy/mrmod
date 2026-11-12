@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   vector,
 } from "drizzle-orm/pg-core";
-import type { ActionPlan, JudgeVerdict, Signals, PolicyRule, RuleMode } from "../types.js";
+import type { ActionPlan, JudgeVerdict, Signals, PolicyRule, RuleMode, SuggestedAnswer } from "../types.js";
 
 /** Key/value settings edited from the hub. Values are validated by settingsSchema in config.ts. */
 export const settings = pgTable("settings", {
@@ -69,6 +69,8 @@ export const decisions = pgTable(
     labeledAt: timestamp("labeled_at", { withTimezone: true }),
     /** Random sample of allowed messages for catching misses. */
     sampled: boolean("sampled").notNull().default(false),
+    /** Shadow-mode draft answer for questions: what the bot would have replied. */
+    suggestedAnswer: jsonb("suggested_answer").$type<SuggestedAnswer>(),
     modlogMessageId: text("modlog_message_id"),
   },
   (t) => [

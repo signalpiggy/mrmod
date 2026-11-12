@@ -22,7 +22,7 @@ import { and, count, desc, eq, isNotNull, isNull, sql as dsql } from "drizzle-or
 import { Hono, type Context } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import { checkPassword, checkSetupCode, getAdmin, setPassword, tooManyAttempts, validPassword } from "./auth.js";
-import { ago, Layout, ModePill } from "./layout.js";
+import { ago, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
 
 const { decisions, rules, auditLog, kbPages, kbChunks, qaLog } = schema;
 
@@ -289,6 +289,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     else if (q.label) conds.push(eq(decisions.label, q.label));
     if (q.mode) conds.push(eq(decisions.mode, q.mode as RuleMode));
     if (q.matched === "1") conds.push(isNotNull(decisions.ruleId));
+    if (q.matched === "q") conds.push(isNotNull(decisions.suggestedAnswer));
     const rows = await db
       .select()
       .from(decisions)
@@ -329,6 +330,9 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
             <option value="1" selected={q.matched === "1"}>
               Matched a rule
             </option>
+            <option value="q" selected={q.matched === "q"}>
+              Questions (suggested answers)
+            </option>
           </select>
           <button class="small">Filter</button>
         </form>
@@ -362,6 +366,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                     {d.signals.supportScam.matched ? ` · scam pattern: ${d.signals.supportScam.patterns.join("/")}` : ""}
                     {d.sampled ? " · random sample" : ""}
                   </div>
+                  {d.suggestedAnswer && <SuggestedAnswerBox a={d.suggestedAnswer} />}
                 </td>
                 <td>
                   {d.verdict ? (
@@ -580,7 +585,13 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               <input type="checkbox" name="logAllMessages" value="1" checked={s.logAllMessages} style="width:auto" /> Log every message to the hub's Message log
             </label>
             <div class="hint">Turn off once you're happy, so only suspicious messages and a 2% sample are logged.</div>
+            <label>
+              <input type="checkbox" name="suggestAnswers" value="1" checked={s.suggestAnswers} style="width:auto" /> Suggest answers to questions (shadow)
+            </label>
+            <div class="hint">When the AI sees a help question, it drafts the reply it would give from support.nu.fi and shows it in the Message log. Nothing is posted in Discord.</div>
           </div>
+          <label>Footer on every bot answer</label>
+          <input name="answerFooter" value={s.answerFooter} />
           <label>Server rules the AI judge cites</label>
           <textarea name="serverRules">{s.serverRules}</textarea>
           <h2>Models</h2>
@@ -605,6 +616,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     for (const k of ID_KEYS) next[k] = String(b[k] ?? "").trim() || null;
     next.judgeAll = b.judgeAll === "1";
     next.logAllMessages = b.logAllMessages === "1";
+    next.suggestAnswers = b.suggestAnswers === "1";
+    next.answerFooter = String(b.answerFooter ?? "").trim();
     next.serverRules = String(b.serverRules ?? "");
     const parsed = settingsSchema.safeParse({ ...current, ...next });
     if (!parsed.success) return c.redirect(`/settings?error=${encodeURIComponent("Not saved: " + parsed.error.issues.map((i) => i.path.join(".")).join(", "))}`);

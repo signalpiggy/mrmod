@@ -1,7 +1,11 @@
 import {
+  answerQuestion,
+  formatAnswer,
   insertDecision,
+  looksLikeQuestion,
   runPipeline,
   setModlogMessage,
+  setSuggestedAnswer,
   type Decision,
   type MessageInput,
 } from "@mrmod/core";
@@ -82,6 +86,32 @@ export async function handleMessage(state: BotState, message: Message<true>) {
   }
   if (decision.match?.action.alert && decision.match.mode === "enforce") {
     await postAlert(message.client, state, id, decision, executed).catch((err) => log.error("alert post failed", err));
+  }
+  if (wantsSuggestion(state, message, decision)) await suggestAnswer(state, id, decision);
+}
+
+/** Shadow Q&A: draft the reply the bot would give to a question, for review in the hub. Never posted. */
+function wantsSuggestion(state: BotState, message: Message<true>, d: Decision): boolean {
+  if (!state.settings.suggestAnswers || d.match) return false;
+  if (message.client.user && message.mentions.users.has(message.client.user.id)) return false; // answered for real
+  const v = d.verdict;
+  if (v?.source === "llm" && v.is_question !== undefined) return v.is_question && v.verdict === "ok";
+  return looksLikeQuestion(d.input.content);
+}
+
+async function suggestAnswer(state: BotState, id: number, d: Decision) {
+  try {
+    const a = await answerQuestion(state.db, state.settings, d.input.content, { userId: d.input.authorId, channelId: d.input.channelId }, { log: false });
+    await setSuggestedAnswer(state.db, id, {
+      answerable: a.answerable,
+      text: formatAnswer(a, state.settings),
+      sources: a.sources,
+      model: a.model,
+      latencyMs: a.latencyMs,
+    });
+  } catch (err) {
+    log.warn("suggested answer failed", err);
+    await setSuggestedAnswer(state.db, id, { answerable: false, text: "", sources: [], error: String(err).slice(0, 300) }).catch(() => {});
   }
 }
 
