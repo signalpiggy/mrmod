@@ -3,6 +3,7 @@ import {
   configureOpenAI,
   crawlKnowledgeBase,
   loadSecrets,
+  parseBotCommand,
   runMigrations,
   seedRules,
   setRuntime,
@@ -11,7 +12,7 @@ import {
 import { Client, Events, GatewayIntentBits, Partials, REST, Routes } from "discord.js";
 import { answerMention, COMMANDS, handleInteraction } from "./interactions.js";
 import { log } from "./log.js";
-import { handleMessage } from "./moderation.js";
+import { handleMessage, runHubCommand } from "./moderation.js";
 import { BotState } from "./state.js";
 
 type Ready = Required<SecretValues>;
@@ -123,7 +124,9 @@ async function main() {
   setTimeout(crawl, 30_000);
   setInterval(crawl, Math.max(1, state.settings.crawlIntervalHours) * 3_600_000);
   await state.sql.listen("mrmod_cmd", (payload) => {
-    if (payload === "recrawl") void crawl();
+    if (payload === "recrawl") return void crawl();
+    const cmd = parseBotCommand(payload);
+    if (cmd) void runHubCommand(state, client, guildId, cmd);
   });
   setInterval(() => {
     applyRetention(state.db, state.settings.retentionDays)

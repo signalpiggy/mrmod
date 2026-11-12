@@ -89,6 +89,33 @@ export async function setSuggestedAnswer(db: DB, id: number, suggestedAnswer: Su
   await db.update(decisions).set({ suggestedAnswer }).where(eq(decisions.id, id));
 }
 
+/** Record an action taken after the fact (e.g. a ban from the hub) on a decision. */
+export async function appendExecuted(db: DB, id: number, item: string) {
+  await db
+    .update(decisions)
+    .set({ executed: dsql`${decisions.executed} || ${JSON.stringify([item])}::jsonb` })
+    .where(eq(decisions.id, id));
+}
+
+/** Command the hub sends the bot over NOTIFY mrmod_cmd. */
+export type BotCommand = { type: "ban"; decisionId: number; actor: string; deleteMessageHours: number };
+
+export async function sendBotCommand(db: DB, cmd: BotCommand) {
+  await db.execute(dsql`SELECT pg_notify('mrmod_cmd', ${JSON.stringify(cmd)})`);
+}
+
+export function parseBotCommand(payload: string): BotCommand | null {
+  try {
+    const c = JSON.parse(payload) as Partial<BotCommand>;
+    if (c.type === "ban" && Number.isInteger(c.decisionId) && typeof c.actor === "string") {
+      return { type: "ban", decisionId: c.decisionId!, actor: c.actor.slice(0, 100), deleteMessageHours: Math.min(168, Math.max(0, Number(c.deleteMessageHours) || 0)) };
+    }
+  } catch {
+    /* "recrawl" and other plain commands */
+  }
+  return null;
+}
+
 export async function setModlogMessage(db: DB, id: number, modlogMessageId: string) {
   await db.update(decisions).set({ modlogMessageId }).where(eq(decisions.id, id));
 }

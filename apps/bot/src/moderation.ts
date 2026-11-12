@@ -1,4 +1,7 @@
 import {
+  appendExecuted,
+  audit,
+  getDecision,
   answerQuestion,
   formatAnswer,
   insertDecision,
@@ -6,6 +9,7 @@ import {
   runPipeline,
   setModlogMessage,
   setSuggestedAnswer,
+  type BotCommand,
   type Decision,
   type MessageInput,
 } from "@mrmod/core";
@@ -237,3 +241,34 @@ export const BUTTON_PERMS = {
   dismiss: PermissionFlagsBits.ManageMessages,
   label: PermissionFlagsBits.ManageMessages,
 } as const;
+
+/** Runs a ban an admin confirmed in the hub. The decision row (not the payload) says who and where. */
+export async function runHubCommand(state: BotState, client: Client, guildId: string, cmd: BotCommand) {
+  const d = await getDecision(state.db, cmd.decisionId);
+  if (!d || d.guildId !== guildId) return log.warn(`hub ban: decision ${cmd.decisionId} not found for this server`);
+  let result: string;
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(d.authorId).catch(() => null);
+    if (member && !member.bannable) {
+      result = "ban failed from hub (member is above the bot's role)";
+    } else {
+      await guild.members.ban(d.authorId, {
+        reason: `mrmod: banned from hub by ${cmd.actor} (message log #${d.id})`,
+        deleteMessageSeconds: cmd.deleteMessageHours * 3600,
+      });
+      result = `ban (from hub by ${cmd.actor})`;
+    }
+  } catch (err) {
+    result = `ban failed from hub: ${String(err).slice(0, 200)}`;
+  }
+  log.info(`hub ban of ${d.authorId}: ${result}`);
+  await appendExecuted(state.db, d.id, result).catch((e) => log.error("hub ban: record failed", e));
+  await audit(state.db, "bot", "bot", "member.ban", d.authorId, { decisionId: d.id, by: cmd.actor, result }).catch(() => {});
+  const ch = await sendable(client, state.settings.modlogChannelId);
+  if (ch && "send" in ch) {
+    await ch
+      .send({ content: `🔨 ${result.startsWith("ban (") ? "Banned" : "Couldn't ban"} <@${d.authorId}> (${d.authorTag ?? d.authorId}) from the hub, message log #${d.id}${result.startsWith("ban (") ? "" : `: ${result}`}`, allowedMentions: { parse: [] } })
+      .catch(() => {});
+  }
+}
