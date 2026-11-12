@@ -246,12 +246,23 @@ const Linked: FC<{ text: string }> = ({ text }) => (
   </>
 );
 
-export const SuggestedAnswerBox: FC<{ a: { answerable: boolean; text: string; error?: string; latencyMs?: number } }> = ({ a }) => (
-  <div class={`suggest${a.answerable ? "" : " no"}`}>
+export const SuggestedAnswerBox: FC<{
+  a: { kind?: string; specialCase?: string; ignored?: boolean; answerable: boolean; text: string; error?: string; latencyMs?: number };
+}> = ({ a }) => (
+  <div class={`suggest${a.answerable && !a.ignored ? "" : " no"}`}>
     <div class="k">
-      Suggested answer · not posted{a.answerable ? "" : " · not found in help centre"}
+      {a.kind === "special" ? `Special case: ${a.specialCase ?? "?"}${a.ignored ? " · would ignore" : " · suggested reply · not posted"}` : "Suggested answer · not posted"}
+      {a.kind !== "special" && !a.answerable ? " · not found in help centre" : ""}
       {a.latencyMs ? ` · ${(a.latencyMs / 1000).toFixed(1)}s` : ""}
     </div>
-    <div style="white-space:pre-wrap">{a.error ? <span class="badc">Couldn't draft: {a.error}</span> : <Linked text={a.text} />}</div>
+    {a.error ? (
+      <div style="white-space:pre-wrap">
+        <span class="badc">Couldn't draft: {a.error}</span>
+      </div>
+    ) : a.ignored ? null : (
+      <div style="white-space:pre-wrap">
+        <Linked text={a.text} />
+      </div>
+    )}
   </div>
 );

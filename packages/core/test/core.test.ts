@@ -309,3 +309,21 @@ describe("answer styling", () => {
     expect(answerInstructions({ answerPrompt: "", answerMaxChars: 900 })).toContain("under 900 characters");
   });
 });
+
+describe("ignore list and special cases", async () => {
+  const { knownSpecialCase } = await import("../src/knowledge/special.js");
+  const { judgeInstructions } = await import("../src/ai.js");
+  const cases = 'Partnerships: questions like "who can I DM for partnerships?". Reply "Email partners@example.com."\n- Price talk: ignore';
+  it("accepts only case names the admin wrote", () => {
+    expect(knownSpecialCase(cases, "partnerships")).toBe("Partnerships");
+    expect(knownSpecialCase(cases, "Price talk")).toBe("Price talk");
+    expect(knownSpecialCase(cases, "Refunds")).toBeNull();
+    expect(knownSpecialCase(cases, null)).toBeNull();
+  });
+  it("gives the judge the ignore list and special cases", () => {
+    const t = judgeInstructions({ ...defaultSettings, specialCases: cases });
+    expect(t).toContain("gm, gn, hello");
+    expect(t).toContain("Partnerships:");
+    expect(judgeInstructions(defaultSettings)).toContain("always set special_case=null");
+  });
+});

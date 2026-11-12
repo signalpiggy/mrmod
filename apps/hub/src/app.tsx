@@ -462,6 +462,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                             <b class={`v-${k}`}>{prettyVerdict(d.verdict.verdict)}</b>
                             <span>{conf}% confident</span>
                             {d.verdict.is_question && <span class="pill info">· question</span>}
+                            {d.verdict.ignore && <span class="pill">· ignored</span>}
+                            {d.verdict.special_case && <span class="pill info">· special: {d.verdict.special_case}</span>}
                           </div>
                           <div class="tq-meter">
                             <i class={k} style={`width:${conf}%`} />
@@ -814,6 +816,24 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               </div>
             </div>
             <div class="field">
+              <label for="f-ignorePrompt">Messages to ignore</label>
+              <textarea id="f-ignorePrompt" name="ignorePrompt" style="min-height:80px">{s.ignorePrompt}</textarea>
+              <div class="hint">
+                Kinds of messages that aren't questions or scams and should get no reply, e.g. GMs, hellos, thanks, emoji. They're still checked for scams and still logged,
+                marked "ignored".
+              </div>
+            </div>
+            <div class="field">
+              <label for="f-specialCases">Special cases</label>
+              <textarea id="f-specialCases" name="specialCases" placeholder={'Partnerships: questions like "who can I DM for partnerships?". Reply "For partnerships, email partners@example.com."\nPrice talk: ignore'}>
+                {s.specialCases}
+              </textarea>
+              <div class="hint">
+                One per line as <b>Name: instruction</b>. Describe the kind of message, then say what to do: "ignore", or "reply ..." (wording in quotes is used exactly).
+                Matching messages show the would-be reply in the Message log. Only use links, emails or names you write here; the bot won't invent them.
+              </div>
+            </div>
+            <div class="field">
               <label for="f-answerLinkFormat">Link format</label>
               <input id="f-answerLinkFormat" name="answerLinkFormat" value={s.answerLinkFormat} />
               <div class="hint">
@@ -865,6 +885,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     next.suggestAnswers = b.suggestAnswers === "1";
     next.answerFooter = String(b.answerFooter ?? "").trim();
     next.answerPrompt = String(b.answerPrompt ?? "").trim().slice(0, 4000);
+    next.ignorePrompt = String(b.ignorePrompt ?? "").trim().slice(0, 4000);
+    next.specialCases = String(b.specialCases ?? "").trim().slice(0, 6000);
     next.answerLinkFormat = String(b.answerLinkFormat ?? "").trim().slice(0, 200) || "<{url}>";
     next.answerMaxChars = Math.round(Number(b.answerMaxChars) || 1200);
     next.serverRules = String(b.serverRules ?? "");

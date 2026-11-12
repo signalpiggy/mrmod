@@ -8,4 +8,5 @@ export * from "./db/client.js";
 export * from "./db/store.js";
 export * from "./knowledge/crawl.js";
 export * from "./knowledge/answer.js";
+export * from "./knowledge/special.js";
 export * from "./secrets.js";
