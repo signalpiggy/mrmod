@@ -814,6 +814,19 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               </div>
             </div>
             <div class="field">
+              <label for="f-answerLinkFormat">Link format</label>
+              <input id="f-answerLinkFormat" name="answerLinkFormat" value={s.answerLinkFormat} />
+              <div class="hint">
+                How each source link is shown under an answer. {"{url}"} is the link and {"{title}"} the page title. Examples: {"🔗 <{url}>"} or {"🔗 [{title}](<{url}>)"}. The
+                angle brackets stop Discord showing a big preview card. Link styling in the Answer prompt has no effect: use this field.
+              </div>
+            </div>
+            <div class="field">
+              <label for="f-answerMaxChars">Maximum answer length (characters)</label>
+              <input id="f-answerMaxChars" name="answerMaxChars" type="number" min="100" max="1700" value={String(s.answerMaxChars)} />
+              <div class="hint">Hard cap on the answer text, before links and footer (100 to 1700). The Answer prompt sets the style within it.</div>
+            </div>
+            <div class="field">
               <label for="f-answerFooter">Footer on every bot answer</label>
               <input id="f-answerFooter" name="answerFooter" value={s.answerFooter} />
             </div>
@@ -852,6 +865,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     next.suggestAnswers = b.suggestAnswers === "1";
     next.answerFooter = String(b.answerFooter ?? "").trim();
     next.answerPrompt = String(b.answerPrompt ?? "").trim().slice(0, 4000);
+    next.answerLinkFormat = String(b.answerLinkFormat ?? "").trim().slice(0, 200) || "<{url}>";
+    next.answerMaxChars = Math.round(Number(b.answerMaxChars) || 1200);
     next.serverRules = String(b.serverRules ?? "");
     const parsed = settingsSchema.safeParse({ ...current, ...next });
     if (!parsed.success) return c.redirect(`/settings?error=${encodeURIComponent("Not saved: " + parsed.error.issues.map((i) => i.path.join(".")).join(", "))}`);

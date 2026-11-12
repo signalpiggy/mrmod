@@ -231,11 +231,13 @@ export function ago(d: Date | string | null | undefined): string {
 /** Renders text with bare/angle-bracketed URLs as links, the way Discord shows them. */
 const Linked: FC<{ text: string }> = ({ text }) => (
   <>
-    {text.split(/(<?https?:\/\/[^\s>]+>?)/g).map((part) => {
-      const url = part.replace(/^<|>$/g, "");
+    {text.split(/(\[[^\]\n]+\]\(<?https?:\/\/[^\s)>]+>?\)|<?https?:\/\/[^\s>]+>?)/g).map((part) => {
+      // Discord markdown link [title](<url>) shows the title; bare or <url> shows the URL.
+      const md = /^\[([^\]]+)\]\(<?(https?:\/\/[^\s)>]+)>?\)$/.exec(part);
+      const url = md ? md[2]! : part.replace(/^<|>$/g, "");
       return /^https?:\/\//.test(url) ? (
         <a href={url} target="_blank" rel="noreferrer">
-          {url}
+          {md ? md[1] : url}
         </a>
       ) : (
         part.replace(/^-# /gm, "")

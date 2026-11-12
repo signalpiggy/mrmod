@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings, parseSettings } from "../src/config.js";
-import { answerInstructions, formatAnswer, looksLikeQuestion } from "../src/knowledge/answer.js";
+import { answerInstructions, formatAnswer, formatLink, looksLikeQuestion } from "../src/knowledge/answer.js";
 import { chunkText, extractArticle, isArticle, isCrawlable, normalizeUrl } from "../src/knowledge/crawl.js";
 import { DuplicateTracker, runPipeline, VerdictCache, type PipelineDeps } from "../src/pipeline.js";
 import { DEFAULT_RULES, evaluatePolicy } from "../src/policy.js";
@@ -229,7 +229,7 @@ describe("suggested answers", () => {
       { answerable: true, text: "Go to Settings > Export.", sources: [{ url: "https://support.nu.fi/support/solutions/articles/1-export", title: "Export" }] },
       defaultSettings,
     );
-    expect(out).toContain("<https://support.nu.fi/support/solutions/articles/1-export>");
+    expect(out).toContain("🔗 <https://support.nu.fi/support/solutions/articles/1-export>");
     expect(out).toContain("AI-generated");
     expect(out).toContain("For clarification, ping @AdminBen");
   });
@@ -259,7 +259,7 @@ describe("hub commands", () => {
 
 describe("answer prompt", () => {
   it("keeps the safety rules and appends the admin's guidance", () => {
-    const text = answerInstructions({ answerPrompt: "Always mention the NuFi mobile app." });
+    const text = answerInstructions({ answerPrompt: "Always mention the NuFi mobile app.", answerMaxChars: 1200 });
     expect(text).toContain("Never ask anyone for a seed phrase");
     expect(text).toContain("Always mention the NuFi mobile app.");
     expect(answerInstructions(defaultSettings)).toContain("VERY concise");
@@ -289,5 +289,23 @@ describe("crawling nu.fi as well as the help centre", () => {
     expect(a.text).toContain("Cardano | Yes");
     expect(a.text).not.toContain("Newsletter");
     expect(a.text).not.toContain("Menu");
+  });
+});
+
+describe("answer styling", () => {
+  const src = { url: "https://nu.fi/chains/support", title: "Supported [Blockchains]" };
+  it("uses the admin's link format", () => {
+    expect(formatLink("🔗 [{title}](<{url}>)", src)).toBe("🔗 [Supported Blockchains](<https://nu.fi/chains/support>)");
+    expect(formatLink("no placeholder", src)).toBe("<https://nu.fi/chains/support>");
+  });
+  it("caps the answer at the configured length and stays under Discord's limit", () => {
+    const out = formatAnswer({ answerable: true, text: "word ".repeat(1000), sources: [src] }, { ...defaultSettings, answerMaxChars: 300 });
+    expect(out.split("\n")[0]!.length).toBeLessThanOrEqual(300);
+    expect(out).toContain("🔗 <https://nu.fi/chains/support>");
+    const big = formatAnswer({ answerable: true, text: "x".repeat(5000), sources: [src, src, src] }, { ...defaultSettings, answerMaxChars: 1700 });
+    expect(big.length).toBeLessThanOrEqual(2000);
+  });
+  it("tells the model the length limit", () => {
+    expect(answerInstructions({ answerPrompt: "", answerMaxChars: 900 })).toContain("under 900 characters");
   });
 });
