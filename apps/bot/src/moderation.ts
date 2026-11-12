@@ -99,13 +99,16 @@ function wantsSuggestion(state: BotState, message: Message<true>, d: Decision): 
   if (!state.settings.suggestAnswers || d.match) return false;
   if (message.client.user && message.mentions.users.has(message.client.user.id)) return false; // answered for real
   const v = d.verdict;
-  if (v?.source === "llm" && v.is_question !== undefined) return v.is_question && v.verdict === "ok";
-  return looksLikeQuestion(d.input.content);
+  if (v && v.verdict !== "ok") return false;
+  const yes = Boolean(v?.is_question) || looksLikeQuestion(d.input.content);
+  log.info(`suggest #${d.input.messageId}: ${yes ? "drafting" : "not a question"} (judge is_question=${String(v?.is_question)})`);
+  return yes;
 }
 
 async function suggestAnswer(state: BotState, id: number, d: Decision) {
   try {
     const a = await answerQuestion(state.db, state.settings, d.input.content, { userId: d.input.authorId, channelId: d.input.channelId }, { log: false });
+    log.info(`suggested answer for decision ${id}: ${a.answerable ? "answered" : "not in help centre"} (${a.sources.length} links, ${a.latencyMs}ms)`);
     await setSuggestedAnswer(state.db, id, {
       answerable: a.answerable,
       text: formatAnswer(a, state.settings),

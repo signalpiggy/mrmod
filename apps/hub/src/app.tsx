@@ -380,7 +380,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                 <td>
                   {d.verdict ? (
                     <>
-                      <b>{d.verdict.verdict}</b> {Math.round(d.verdict.confidence * 100)}%<div class="hint">{d.verdict.reason}</div>
+                      <b>{d.verdict.verdict}</b> {Math.round(d.verdict.confidence * 100)}%{d.verdict.is_question ? " · question" : ""}<div class="hint">{d.verdict.reason}</div>
                     </>
                   ) : (
                     "–"
