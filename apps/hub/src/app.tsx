@@ -24,7 +24,8 @@ import { and, count, desc, eq, isNotNull, isNull, sql as dsql } from "drizzle-or
 import { Hono, type Context } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import { checkPassword, checkSetupCode, getAdmin, setPassword, tooManyAttempts, validPassword } from "./auth.js";
-import { ago, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
+import { ago, FONTS, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
+import { kindOf, LOG_CSS, LOG_JS, prettyVerdict, TABS } from "./logview.js";
 
 const { decisions, rules, auditLog, kbPages, kbChunks, qaLog } = schema;
 
@@ -71,26 +72,31 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
   });
 
   app.get("/healthz", (c) => c.text("ok"));
+  app.get("/fonts/:file", (c) => {
+    const f = FONTS[c.req.param("file")];
+    if (!f) return c.notFound();
+    return c.body(new Uint8Array(f), 200, { "Content-Type": "font/woff2", "Cache-Control": "public, max-age=31536000, immutable" });
+  });
 
   // ---------- setup & login ----------
   app.get("/setup", async (c) => {
     if (await getAdmin(db)) return c.redirect("/login");
     return c.html(
       <Layout title="Set up" authed={false}>
-        <div class="card" style="max-width:460px">
+        <form method="post" class="card">
           <h1>Set up the hub</h1>
-          <p>Enter the one-time setup code (Claude will send it to you) and choose the admin password.</p>
-          <form method="post">
-            <label>Setup code</label>
-            <input name="code" autocomplete="off" required />
-            <label>Admin password</label>
-            <input name="password" type="password" autocomplete="new-password" minlength={12} required />
+          <p class="hint">Enter the one-time setup code (Claude will send it to you) and choose the admin password.</p>
+          <div class="field">
+            <label for="code">Setup code</label>
+            <input id="code" name="code" autocomplete="off" required />
+          </div>
+          <div class="field">
+            <label for="password">Admin password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" minlength={12} required />
             <div class="hint">At least 12 characters. Store it in your password manager.</div>
-            <p>
-              <button>Save password</button>
-            </p>
-          </form>
-        </div>
+          </div>
+          <button class="danger">Save password</button>
+        </form>
       </Layout>,
     );
   });
@@ -114,16 +120,14 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     if (!(await getAdmin(db))) return c.redirect("/setup");
     return c.html(
       <Layout title="Sign in" authed={false}>
-        <div class="card" style="max-width:380px">
+        <form method="post" class="card">
           <h1>Sign in</h1>
-          <form method="post">
-            <label>Password</label>
-            <input name="password" type="password" autocomplete="current-password" required autofocus />
-            <p>
-              <button>Sign in</button>
-            </p>
-          </form>
-        </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+          </div>
+          <button class="danger">Sign in</button>
+        </form>
       </Layout>,
     );
   });
@@ -194,15 +198,26 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
 
     return c.html(
       <Layout title="Overview" path="/">
-        <h1>Overview</h1>
+        <div class="head">
+          <h1>Overview</h1>
+          <div class="right">
+            <ModePill mode={settings.globalMode === "shadow" ? "shadow" : "enforce"} />
+            <form method="post" action="/mode">
+              <input type="hidden" name="mode" value={settings.globalMode === "shadow" ? "enforce" : "shadow"} />
+              <button class={`small ${settings.globalMode === "shadow" ? "danger" : "ghost"}`}>
+                {settings.globalMode === "shadow" ? "Allow enforced rules to act" : "Force everything to shadow"}
+              </button>
+            </form>
+          </div>
+        </div>
         {missing.length > 0 && (
           <div class="flash">
-            The bot is waiting for: {missing.join(", ")}. <a href="/connection">Fill them in on the Connection page.</a>
+            The bot is waiting for: {missing.join(", ")}. <a href="/connection">Fill them in on the Keys page.</a>
           </div>
         )}
         <div class="grid">
           <div class="card stat">
-            <span>Bot</span>
+            <span class="lbl">Bot</span>
             <b class={botState === "online" ? "okc" : "warnc"}>{botState}</b>
             <span>
               {bot?.value.tag ?? ""} {bot?.value.guild ? `in ${bot.value.guild}` : ""} · {ago(bot?.updatedAt)}
@@ -210,63 +225,70 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
             {bot?.value.error && <div class="hint badc">{bot.value.error}</div>}
           </div>
           <div class="card stat">
-            <span>Global mode</span>
-            <b>
-              <ModePill mode={settings.globalMode} />
-            </b>
-            <form method="post" action="/mode">
-              <input type="hidden" name="mode" value={settings.globalMode === "shadow" ? "enforce" : "shadow"} />
-              <button class="small ghost">{settings.globalMode === "shadow" ? "Allow enforced rules to act" : "Force everything to shadow"}</button>
-            </form>
+            <span class="lbl">Global mode</span>
+            <b class={settings.globalMode === "shadow" ? "warnc" : "badc"}>{settings.globalMode}</b>
+            <span>{settings.globalMode === "shadow" ? "Nothing is deleted or banned; Mr Mod only logs what it would do." : "Rules set to enforce act in Discord."}</span>
           </div>
           <div class="card stat">
-            <span>Last 24 hours</span>
-            <b>{day.matched} matched</b>
+            <span class="lbl">Last 24 hours</span>
+            <b>{day.matched} caught</b>
             <span>
               {day.total} logged · {day.judged} judged by AI
             </span>
           </div>
           <div class="card stat">
-            <span>AI tokens (7 days)</span>
+            <span class="lbl">AI tokens · 7 days</span>
             <b>{(week.inputTokens + week.outputTokens).toLocaleString()}</b>
             <span>
               {week.inputTokens.toLocaleString()} in · {week.outputTokens.toLocaleString()} out
             </span>
           </div>
         </div>
-        <h2>Rule accuracy from reviews</h2>
-        <div class="card wrap">
-          <table>
-            <tr>
-              <th>Rule</th>
-              <th>Mode</th>
-              <th>Matches</th>
-              <th>Reviewed</th>
-              <th>Precision</th>
-            </tr>
-            {ruleRows
-              .sort((a, b) => a.priority - b.priority)
-              .map((r) => {
-                const p = precision.find((x) => x.ruleId === r.id);
-                const prec = p && p.reviewed ? Math.round((p.correct / p.reviewed) * 100) : null;
-                return (
-                  <tr>
-                    <td>
-                      <a href={`/decisions?rule=${r.id}`}>{r.name}</a>
-                    </td>
-                    <td>
-                      <ModePill mode={r.mode} />
-                    </td>
-                    <td>{p?.total ?? 0}</td>
-                    <td>{p?.reviewed ?? 0}</td>
-                    <td class={prec === null ? "" : prec >= 95 ? "okc" : prec >= 80 ? "warnc" : "badc"}>
-                      {prec === null ? "–" : `${prec}%`}
-                      {prec !== null && p!.reviewed >= 50 && prec >= 95 && r.mode === "shadow" ? " · ready to enforce" : ""}
-                    </td>
-                  </tr>
-                );
-              })}
-          </table>
+        <div class="card">
+          <div class="head">
+            <h2 style="margin:0">Rule accuracy from your reviews</h2>
+            <a class="right btn small ghost" href="/decisions?label=none">
+              Review the queue
+            </a>
+          </div>
+          <div class="wrap">
+            <table>
+              <tr>
+                <th>Rule</th>
+                <th>Mode</th>
+                <th>Caught</th>
+                <th>Reviewed</th>
+                <th>Accuracy</th>
+              </tr>
+              {ruleRows
+                .sort((a, b) => a.priority - b.priority)
+                .map((r) => {
+                  const p = precision.find((x) => x.ruleId === r.id);
+                  const prec = p && p.reviewed ? Math.round((p.correct / p.reviewed) * 100) : null;
+                  return (
+                    <tr>
+                      <td>
+                        <a href={`/decisions?rule=${r.id}`}>{r.name}</a>
+                      </td>
+                      <td>
+                        <ModePill mode={r.mode} />
+                      </td>
+                      <td>{p?.total ?? 0}</td>
+                      <td>{p?.reviewed ?? 0}</td>
+                      <td>
+                        {prec === null ? (
+                          "–"
+                        ) : (
+                          <span class={`pill ${prec >= 95 ? "ok" : prec >= 80 ? "warn" : "bad"}`}>
+                            {prec}%{p!.reviewed >= 50 && prec >= 95 && r.mode === "shadow" ? " · ready to enforce" : ""}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </table>
+          </div>
           <div class="hint">
             Misses reported: {missed[0]?.n ?? 0}. Move a rule to enforce once it has about 50 reviews at 95% or better.
           </div>
@@ -300,119 +322,208 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
       .limit(300);
     const ruleRows = await loadRules(db);
     const settings = await loadSettings(db);
+    const reviewed = rows.filter((r) => r.label).length;
+    const tab = q.label === "none" && !q.rule && !q.matched ? "?label=none" : q.matched === "1" && !q.rule && !q.label ? "?matched=1" : q.matched === "q" && !q.rule && !q.label ? "?matched=q" : !q.rule && !q.label && !q.matched ? "" : "custom";
     return c.html(
-      <Layout title="Message log" path="/decisions" flash={c.req.query("flash") ?? undefined}>
-        <h1>Message log</h1>
-        <p class="hint">
-          {settings.logAllMessages ? "Every message is logged (turn off in Settings)." : "Suspicious messages and a random sample are logged."} Newest first;
-          <a href="">refresh</a> to see new ones. Discord #mod-log only gets messages that match a rule.
-        </p>
-        <form class="row card" method="get">
-          <select name="rule">
-            <option value="">All rules</option>
-            {ruleRows.map((r) => (
-              <option value={r.id} selected={q.rule === r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-          <select name="label">
-            <option value="">Any review</option>
-            <option value="none" selected={q.label === "none"}>
-              Not reviewed
-            </option>
-            {["correct", "wrong", "missed"].map((l) => (
-              <option value={l} selected={q.label === l}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <select name="matched">
-            <option value="">Matched or not</option>
-            <option value="1" selected={q.matched === "1"}>
-              Matched a rule
-            </option>
-            <option value="q" selected={q.matched === "q"}>
-              Questions (suggested answers)
-            </option>
-          </select>
-          <button class="small">Filter</button>
-        </form>
-        <div class="card wrap">
-          <table>
-            <tr>
-              <th>When</th>
-              <th>Message</th>
-              <th>Verdict</th>
-              <th>Rule / action</th>
-              <th>Review</th>
-            </tr>
-            {rows.map((d) => (
-              <tr>
-                <td>
-                  #{d.id}
-                  <br />
-                  {ago(d.createdAt)}
-                  <br />
-                  <a href={`https://discord.com/channels/${d.guildId}/${d.channelId}/${d.messageId}`} target="_blank" rel="noreferrer">
-                    #{d.channelName ?? "channel"}
-                  </a>
-                </td>
-                <td class="msg">
-                  <b>{d.authorTag}</b>{" "}
-                  {d.executed.some((e) => e === "ban" || e.startsWith("ban (")) ? (
-                    <span class="pill badc">banned</span>
-                  ) : (
-                    <a class="pill badc" href={`/decisions/${d.id}/ban`} style="text-decoration:none">
-                      Ban user
-                    </a>
-                  )}
-                  {"\n"}
-                  {d.content ?? "(text removed by retention)"}
-                  <div class="hint">
-                    risk {d.riskScore} · acct {Math.round(d.signals.accountAgeDays)}d · joined{" "}
-                    {d.signals.memberAgeDays === null ? "?" : `${Math.round(d.signals.memberAgeDays)}d`}
-                    {d.signals.supportScam.matched ? ` · scam pattern: ${d.signals.supportScam.patterns.join("/")}` : ""}
-                    {d.sampled ? " · random sample" : ""}
-                  </div>
-                  {d.suggestedAnswer && <SuggestedAnswerBox a={d.suggestedAnswer} />}
-                </td>
-                <td>
-                  {d.verdict ? (
-                    <>
-                      <b>{d.verdict.verdict}</b> {Math.round(d.verdict.confidence * 100)}%{d.verdict.is_question ? " · question" : ""}<div class="hint">{d.verdict.reason}</div>
-                    </>
-                  ) : (
-                    "–"
-                  )}
-                  {d.error && <div class="hint badc">{d.error}</div>}
-                </td>
-                <td>
-                  {d.ruleId ?? "–"} <ModePill mode={d.mode} />
-                  <div class="hint">
-                    {d.plannedAction
-                      ? [d.plannedAction.delete && "delete", d.plannedAction.ban && "ban", d.plannedAction.timeoutMinutes && `timeout ${d.plannedAction.timeoutMinutes}m`, d.plannedAction.alert && "alert"]
-                          .filter(Boolean)
-                          .join(", ") || "log only"
-                      : ""}
-                    {d.executed.length ? ` · did: ${d.executed.join(", ")}` : ""}
-                  </div>
-                </td>
-                <td>
-                  {d.label ? <span class="pill">{d.label}</span> : null}
-                  <form method="post" action={`/decisions/${d.id}/label`} class="row" style="margin-top:4px">
-                    <button class="small ghost" name="label" value="correct">
-                      {d.ruleId ? "Correct" : "Fine"}
-                    </button>
-                    <button class="small ghost" name="label" value={d.ruleId ? "wrong" : "missed"}>
-                      {d.ruleId ? "Wrong" : "Missed"}
-                    </button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-          </table>
+      <Layout title="Message log" path="/decisions" bleed flash={c.req.query("flash") ?? undefined}>
+        <div class="tq-top">
+          <h1>Message log</h1>
+          <div class="tq-prog" title="Reviewed rows on this page">
+            <div class="track">
+              <i style={`width:${rows.length ? Math.round((reviewed / rows.length) * 100) : 0}%`} />
+            </div>
+            {rows.length - reviewed} of {rows.length} not reviewed
+          </div>
+          <div class="right">
+            <ModePill mode={settings.globalMode === "shadow" ? "shadow" : "enforce"} />
+            <a class="btn small ghost" href="">
+              Refresh
+            </a>
+          </div>
         </div>
+        <div class="tq-split">
+          <section class="tq-queue" aria-label="Messages">
+            <div class="tq-tabs">
+              {TABS.map(([label, qs]) => (
+                <a href={`/decisions${qs}`} class={tab === qs ? "on" : ""}>
+                  {label}
+                </a>
+              ))}
+              <details class="tq-more" open={!TABS.some(([, qs]) => qs === tab) || undefined}>
+                <summary>Filter</summary>
+                <form method="get" class="tq-filter">
+                  <select name="rule" aria-label="Rule">
+                    <option value="">All rules</option>
+                    {ruleRows.map((r) => (
+                      <option value={r.id} selected={q.rule === r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select name="label" aria-label="Review">
+                    <option value="">Any review</option>
+                    <option value="none" selected={q.label === "none"}>
+                      Not reviewed
+                    </option>
+                    {["correct", "wrong", "missed"].map((l) => (
+                      <option value={l} selected={q.label === l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                  <select name="matched" aria-label="Matched">
+                    <option value="">Matched or not</option>
+                    <option value="1" selected={q.matched === "1"}>
+                      Matched a rule
+                    </option>
+                    <option value="q" selected={q.matched === "q"}>
+                      Questions (suggested answers)
+                    </option>
+                  </select>
+                  <button class="small">Filter</button>
+                </form>
+              </details>
+            </div>
+            <p class="tq-note hint">
+              {settings.logAllMessages ? "Every message is logged (turn off in Settings)." : "Suspicious messages and a random sample are logged."} Newest first. Discord
+              #mod-log only gets messages that match a rule.
+            </p>
+            {rows.length === 0 && <p class="tq-note">Nothing here yet. New messages show up when you refresh.</p>}
+            {rows.map((d) => {
+              const k = kindOf(d);
+              return (
+                <a class="tq-item" href={`#m${d.id}`} data-id={d.id}>
+                  <span class={`blk ${k}`} />
+                  <span class="tq-body">
+                    <b>{d.authorTag ?? d.authorId}</b>
+                    <span class="tq-txt">{d.content ?? "(text removed by retention)"}</span>
+                  </span>
+                  <span class="tq-meta">
+                    <time>{ago(d.createdAt).replace(" ago", "")}</time>
+                    {d.label && <span class={`dot ${d.label === "correct" ? "ok" : "bad"}`} title={`Reviewed: ${d.label}`} />}
+                  </span>
+                </a>
+              );
+            })}
+          </section>
+          <section class="tq-detail" aria-live="polite">
+            {rows.map((d, i) => {
+              const k = kindOf(d);
+              const rule = d.ruleId ? ruleRows.find((r) => r.id === d.ruleId) : undefined;
+              const min = rule?.definition.minConfidence;
+              const conf = d.verdict ? Math.round(d.verdict.confidence * 100) : null;
+              const banned = d.executed.some((e) => e === "ban" || e.startsWith("ban ("));
+              const plan = d.plannedAction;
+              const steps: [string, string, string][] = [];
+              if (plan?.delete) steps.push(["bad", "Delete the message", `in #${d.channelName ?? "channel"}`]);
+              if (plan?.ban) steps.push(["bad", `Ban ${d.authorTag ?? "the author"}`, "and remove their last hour of messages"]);
+              if (plan?.timeoutMinutes) steps.push(["warn", `Time out for ${plan.timeoutMinutes >= 60 ? `${Math.round(plan.timeoutMinutes / 60)}h` : `${plan.timeoutMinutes}m`}`, "they can read but not post"]);
+              if (plan?.alert) steps.push(["info", "Alert admins", plan.recommendBan ? "with a Ban button" : "in the alert channel"]);
+              if (plan && !steps.length) steps.push(["", "Log only", "posted to #mod-log"]);
+              const next = rows[i + 1]?.id ?? d.id;
+              return (
+                <article id={`m${d.id}`} class="tq-art" hidden={i > 0} data-id={d.id}>
+                  <div class="card">
+                    <div class="tq-who">
+                      <span class={`av ${k}`}>{(d.authorTag ?? "?").replace(/[^a-z0-9]/gi, "").charAt(0).toUpperCase() || "?"}</span>
+                      <div>
+                        <b>{d.authorTag ?? d.authorId}</b>
+                        <span class="hint">
+                          #{d.channelName ?? "channel"} · {ago(d.createdAt)} · message #{d.id}
+                          {d.sampled ? " · random sample" : ""}
+                        </span>
+                      </div>
+                      <div class="right">
+                        {d.label && <span class={`pill ${d.label === "correct" ? "ok" : "bad"}`}>reviewed: {d.label}</span>}
+                        {banned ? <span class="pill bad">banned</span> : null}
+                        <a href={`https://discord.com/channels/${d.guildId}/${d.channelId}/${d.messageId}`} target="_blank" rel="noreferrer">
+                          Open in Discord ↗
+                        </a>
+                      </div>
+                    </div>
+                    <blockquote class="tq-quote">{d.content ?? "(text removed by retention)"}</blockquote>
+                    <div class="row">
+                      <span class={`pill ${d.riskScore >= 50 ? "bad" : ""}`}>risk {d.riskScore}</span>
+                      <span class={`pill ${d.signals.accountAgeDays < 7 ? "bad" : ""}`}>account {Math.round(d.signals.accountAgeDays)}d</span>
+                      <span class={`pill ${d.signals.memberAgeDays !== null && d.signals.memberAgeDays < 3 ? "bad" : ""}`}>
+                        joined {d.signals.memberAgeDays === null ? "?" : `${Math.round(d.signals.memberAgeDays)}d ago`}
+                      </span>
+                      {d.signals.supportScam.matched && <span class="pill bad">scam pattern: {d.signals.supportScam.patterns.join(" / ")}</span>}
+                      {d.signals.duplicateChannels > 1 && <span class="pill bad">same text in {d.signals.duplicateChannels} channels</span>}
+                      {d.signals.domains.length > 0 && <span class="pill">links: {d.signals.domains.slice(0, 3).join(", ")}</span>}
+                    </div>
+                  </div>
+                  <div class="tq-vgrid">
+                    <div class="card">
+                      <span class="lbl">AI verdict</span>
+                      {d.verdict ? (
+                        <>
+                          <div class="tq-vbig">
+                            <b class={`v-${k}`}>{prettyVerdict(d.verdict.verdict)}</b>
+                            <span>{conf}% confident</span>
+                            {d.verdict.is_question && <span class="pill info">· question</span>}
+                          </div>
+                          <div class="tq-meter">
+                            <i class={k} style={`width:${conf}%`} />
+                            {min !== undefined && <u style={`left:${Math.round(min * 100)}%`} title="Rule's minimum confidence" />}
+                          </div>
+                          {min !== undefined && <span class="hint">Line = this rule's {Math.round(min * 100)}% minimum</span>}
+                          <p>{d.verdict.reason}</p>
+                        </>
+                      ) : (
+                        <p class="hint">Not judged by the AI (signals were below the threshold).</p>
+                      )}
+                      {d.error && <p class="badc">{d.error}</p>}
+                    </div>
+                    <div class="card">
+                      <div class="row">
+                        <span class="lbl">{rule ? `${d.mode === "enforce" ? "Rule" : "If enforced"}: ${rule.name}` : "What Mr Mod does"}</span>
+                        {d.mode && <ModePill mode={d.mode} />}
+                      </div>
+                      {steps.length ? (
+                        <div class="tq-steps">
+                          {steps.map(([cls, t, sub]) => (
+                            <div class="tq-step">
+                              <i class={cls} />
+                              <div>
+                                {t}
+                                <span class="hint">{sub}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p class="hint">{d.suggestedAnswer ? "Drafts a reply below. Nothing is posted in Discord." : "Nothing. The message is only logged."}</p>
+                      )}
+                      {d.executed.length > 0 && <p class="hint">Done in Discord: {d.executed.join(", ")}</p>}
+                      {d.suggestedAnswer && <SuggestedAnswerBox a={d.suggestedAnswer} />}
+                    </div>
+                  </div>
+                  <form method="post" action={`/decisions/${d.id}/label`} class="tq-keys">
+                    <input type="hidden" name="next" value={String(next)} />
+                    <button class="mint" name="label" value="correct" data-key="c">
+                      {d.ruleId ? "Correct" : "Fine"} <kbd>C</kbd>
+                    </button>
+                    <button class="ghost" name="label" value={d.ruleId ? "wrong" : "missed"} data-key="w">
+                      {d.ruleId ? "Wrong" : "Missed"} <kbd>W</kbd>
+                    </button>
+                    {banned ? (
+                      <span class="btn ghost" aria-disabled="true">
+                        Already banned
+                      </span>
+                    ) : (
+                      <a class="btn danger" href={`/decisions/${d.id}/ban`} data-key="b">
+                        Ban user… <kbd>B</kbd>
+                      </a>
+                    )}
+                  </form>
+                </article>
+              );
+            })}
+          </section>
+        </div>
+        <style dangerouslySetInnerHTML={{ __html: LOG_CSS }} />
+        <script dangerouslySetInnerHTML={{ __html: LOG_JS }} />
       </Layout>,
     );
   });
@@ -429,12 +540,11 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
             The bot will ban <b>{d.authorTag ?? "this user"}</b> (ID {d.authorId}) from the Discord server. They can't rejoin unless someone unbans them in
             Server Settings → Bans.
           </p>
-          <div class="msg card" style="max-width:none">
+          <div style="background:var(--surf2);border-radius:14px;padding:14px 16px;display:grid;gap:4px">
             <span class="hint">
-              #{d.channelName ?? "channel"} · {ago(d.createdAt)}
+              {d.authorTag ?? d.authorId} · #{d.channelName ?? "channel"} · {ago(d.createdAt)}
             </span>
-            {"\n"}
-            {d.content ?? "(text removed by retention)"}
+            <span style="font:500 18px/1.4 var(--display);white-space:pre-wrap;word-break:break-word">{d.content ?? "(text removed by retention)"}</span>
           </div>
           <form method="post" action={`/decisions/${d.id}/ban`}>
             <label>Also delete their recent messages</label>
@@ -446,9 +556,9 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               </option>
               <option value="168">Last 7 days</option>
             </select>
-            <p class="row">
-              <button style="background:var(--bad);border-color:var(--bad)">Yes, ban {d.authorTag ?? "user"}</button>
-              <a href="/decisions">Cancel</a>
+            <p class="row" style="margin-top:14px">
+              <button class="danger">Yes, ban {d.authorTag ?? "user"}</button>
+              <a class="btn ghost" href="/decisions">Cancel</a>
             </p>
           </form>
         </div>
@@ -473,11 +583,14 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
 
   app.post("/decisions/:id/label", async (c) => {
     const id = Number(c.req.param("id"));
-    const label = String((await c.req.parseBody()).label);
+    const body = await c.req.parseBody();
+    const label = String(body.label);
     if (!["correct", "wrong", "missed"].includes(label)) return c.text("bad label", 400);
     await db.update(decisions).set({ label, labeledBy: "hub", labeledAt: new Date() }).where(eq(decisions.id, id));
     await audit(db, c.get("actor"), "admin", "decision.label", String(id), { label });
-    return c.redirect(c.req.header("referer") ?? "/decisions");
+    const back = (c.req.header("referer") ?? "/decisions").split("#")[0] ?? "/decisions";
+    const next = String(body.next ?? "");
+    return c.redirect(/^\d+$/.test(next) ? `${back}#m${next}` : back);
   });
 
   // ---------- rules ----------
@@ -495,7 +608,10 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
           return (
             <form class="card" method="post" action={`/rules/${r.id}`}>
               <div class="row">
-                <b>{r.name}</b> <ModePill mode={r.mode} />
+                <span class="pill">#{r.priority}</span>
+                <h2 style="margin:0">{r.name}</h2>
+                <ModePill mode={r.mode} />
+                {d.action.ban && r.mode === "enforce" ? <span class="pill bad">auto-ban</span> : null}
               </div>
               <div class="hint">{r.description}</div>
               <div class="grid">
@@ -525,8 +641,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               <label>Verdicts</label>
               <div class="row">
                 {VERDICTS.filter((v) => v !== "ok").map((v) => (
-                  <label style="font-weight:400;margin:0">
-                    <input type="checkbox" name="verdicts" value={v} checked={d.verdicts?.includes(v)} style="width:auto" /> {v}
+                  <label class="chk">
+                    <input type="checkbox" name="verdicts" value={v} checked={d.verdicts?.includes(v)} /> {prettyVerdict(v)}
                   </label>
                 ))}
               </div>
@@ -541,8 +657,8 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                     ["recommendBan", "Recommend ban"],
                   ] as const
                 ).map(([k, l]) => (
-                  <label style="font-weight:400;margin:0">
-                    <input type="checkbox" name={k} value="1" checked={Boolean(d.action[k])} style="width:auto" /> {l}
+                  <label class={`chk${k === "ban" || k === "delete" ? " danger" : ""}`}>
+                    <input type="checkbox" name={k} value="1" checked={Boolean(d.action[k])} /> {l}
                   </label>
                 ))}
               </div>
@@ -557,9 +673,9 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                   .filter(Boolean)
                   .join(", ") || "none"}
               </div>
-              <p>
+              <div class="row">
                 <button class="small">Save rule</button>
-              </p>
+              </div>
             </form>
           );
         })}
@@ -600,6 +716,26 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
   const NUM_KEYS = ["riskThreshold", "judgeNewMembersDays", "sampleRate", "retentionDays", "crawlIntervalHours"] as const;
   const STR_KEYS = ["judgeModel", "answerModel", "moderationModel", "embeddingModel"] as const;
   const ID_KEYS = ["modlogChannelId", "alertChannelId", "alertRoleId"] as const;
+  const NAMES: Record<string, string> = {
+    riskThreshold: "Risk threshold",
+    judgeNewMembersDays: "Judge new members (days)",
+    sampleRate: "Sample rate",
+    retentionDays: "Keep message text (days)",
+    crawlIntervalHours: "Re-read help centre (hours)",
+    exemptRoleIds: "Exempt roles",
+    exemptChannelIds: "Exempt channels",
+    trustedRoleIds: "Trusted roles",
+    qaChannelIds: "Q&A channels",
+    modlogChannelId: "Mod log channel",
+    alertChannelId: "Alert channel",
+    alertRoleId: "Alert role",
+    kbStartUrls: "Help centre start URLs",
+    kbAllowedHosts: "Allowed hosts",
+    judgeModel: "Judge model",
+    answerModel: "Answer model",
+    moderationModel: "Moderation model",
+    embeddingModel: "Embedding model",
+  };
   const HELP: Record<string, string> = {
     riskThreshold: "Signal score at which the AI judge runs.",
     judgeNewMembersDays: "Judge every message from members who joined fewer than this many days ago (0 = off).",
@@ -618,58 +754,86 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
   app.get("/settings", async (c) => {
     const s = await loadSettings(db);
     const field = (k: keyof Settings) => (
-      <div>
-        <label>{k}</label>
+      <div class="field">
+        <label for={`f-${k}`}>{NAMES[k] ?? k}</label>
         {(LIST_KEYS as readonly string[]).includes(k) ? (
-          <textarea name={k} style="min-height:70px">
+          <textarea id={`f-${k}`} name={k} style="min-height:76px">
             {(s[k] as string[]).join("\n")}
           </textarea>
         ) : (
-          <input name={k} value={s[k] === null ? "" : String(s[k])} />
+          <input id={`f-${k}`} name={k} value={s[k] === null ? "" : String(s[k])} />
         )}
         {HELP[k] && <div class="hint">{HELP[k]}</div>}
       </div>
     );
     return c.html(
       <Layout title="Settings" path="/settings" flash={c.req.query("saved") ? "Saved." : c.req.query("error") ?? undefined}>
-        <h1>Settings</h1>
-        <form method="post" class="card">
-          <h2>Channels and roles</h2>
-          <div class="grid">{ID_KEYS.map(field)}</div>
-          <div class="grid">{(["exemptRoleIds", "trustedRoleIds", "exemptChannelIds", "qaChannelIds"] as const).map(field)}</div>
-          <h2>Detection</h2>
-          <div class="grid">{(["riskThreshold", "judgeNewMembersDays", "sampleRate", "retentionDays"] as const).map(field)}</div>
-          <div>
-            <label>
-              <input type="checkbox" name="judgeAll" value="1" checked={s.judgeAll} style="width:auto" /> Judge every message from non-exempt members
+        <div class="head">
+          <h1>Settings</h1>
+        </div>
+        <form method="post" style="display:grid;gap:16px">
+          <div class="card">
+            <h2 style="margin:0">Detection</h2>
+            <div class="grid">{(["riskThreshold", "judgeNewMembersDays", "sampleRate", "retentionDays"] as const).map(field)}</div>
+            <label class="check">
+              <input type="checkbox" name="judgeAll" value="1" checked={s.judgeAll} />
+              <span>
+                Judge every message from non-exempt members
+                <span class="hint" style="display:block">Catches more, costs more. On while testing.</span>
+              </span>
             </label>
-            <div class="hint">Catches more, costs more. On while testing.</div>
-            <label>
-              <input type="checkbox" name="logAllMessages" value="1" checked={s.logAllMessages} style="width:auto" /> Log every message to the hub's Message log
+            <label class="check">
+              <input type="checkbox" name="logAllMessages" value="1" checked={s.logAllMessages} />
+              <span>
+                Log every message to the hub's Message log
+                <span class="hint" style="display:block">Turn off once you're happy, so only suspicious messages and a 2% sample are logged.</span>
+              </span>
             </label>
-            <div class="hint">Turn off once you're happy, so only suspicious messages and a 2% sample are logged.</div>
-            <label>
-              <input type="checkbox" name="suggestAnswers" value="1" checked={s.suggestAnswers} style="width:auto" /> Suggest answers to questions (shadow)
-            </label>
-            <div class="hint">When the AI sees a help question, it drafts the reply it would give from support.nu.fi and shows it in the Message log. Nothing is posted in Discord.</div>
+            <div class="field">
+              <label for="f-serverRules">Server rules the AI judge cites</label>
+              <textarea id="f-serverRules" name="serverRules">{s.serverRules}</textarea>
+            </div>
           </div>
-          <label>Answer prompt</label>
-          <textarea name="answerPrompt">{s.answerPrompt}</textarea>
-          <div class="hint">
-            Guides how the bot answers from the support.nu.fi articles: length, tone, what to emphasise, topics to avoid. Built-in safety rules always apply (answer only from
-            the articles, never ask for recovery phrases, never send people to DMs or outside ticket links). Applies to suggested answers, /ask and @mentions.
+          <div class="card">
+            <h2 style="margin:0">Answers</h2>
+            <label class="check">
+              <input type="checkbox" name="suggestAnswers" value="1" checked={s.suggestAnswers} />
+              <span>
+                Suggest answers to questions (shadow)
+                <span class="hint" style="display:block">
+                  When the AI sees a help question, it drafts the reply it would give from support.nu.fi and shows it in the Message log. Nothing is posted in Discord.
+                </span>
+              </span>
+            </label>
+            <div class="field">
+              <label for="f-answerPrompt">Answer prompt</label>
+              <textarea id="f-answerPrompt" name="answerPrompt">{s.answerPrompt}</textarea>
+              <div class="hint">
+                Guides how the bot answers from the support.nu.fi articles: length, tone, what to emphasise, topics to avoid. Built-in safety rules always apply (answer only
+                from the articles, never ask for recovery phrases, never send people to DMs or outside ticket links). Applies to suggested answers, /ask and @mentions.
+              </div>
+            </div>
+            <div class="field">
+              <label for="f-answerFooter">Footer on every bot answer</label>
+              <input id="f-answerFooter" name="answerFooter" value={s.answerFooter} />
+            </div>
           </div>
-          <label>Footer on every bot answer</label>
-          <input name="answerFooter" value={s.answerFooter} />
-          <label>Server rules the AI judge cites</label>
-          <textarea name="serverRules">{s.serverRules}</textarea>
-          <h2>Models</h2>
-          <div class="grid">{STR_KEYS.map(field)}</div>
-          <h2>Knowledge base</h2>
-          <div class="grid">{(["kbStartUrls", "kbAllowedHosts", "crawlIntervalHours"] as const).map(field)}</div>
-          <p>
-            <button>Save settings</button>
-          </p>
+          <div class="card">
+            <h2 style="margin:0">Channels and roles</h2>
+            <div class="grid">{ID_KEYS.map(field)}</div>
+            <div class="grid">{(["exemptRoleIds", "trustedRoleIds", "exemptChannelIds", "qaChannelIds"] as const).map(field)}</div>
+          </div>
+          <div class="card">
+            <h2 style="margin:0">Knowledge base</h2>
+            <div class="grid">{(["kbStartUrls", "kbAllowedHosts", "crawlIntervalHours"] as const).map(field)}</div>
+          </div>
+          <div class="card">
+            <h2 style="margin:0">Models</h2>
+            <div class="grid">{STR_KEYS.map(field)}</div>
+          </div>
+          <div class="row">
+            <button class="danger">Save settings</button>
+          </div>
         </form>
       </Layout>,
     );
@@ -721,9 +885,9 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
               <label>
                 {LABELS[k][0]}{" "}
                 {st[k].set ? (
-                  <span class="pill okc">set · …{st[k].hint} · {ago(st[k].updatedAt)}</span>
+                  <span class="pill ok">set · …{st[k].hint} · {ago(st[k].updatedAt)}</span>
                 ) : (
-                  <span class="pill badc">missing</span>
+                  <span class="pill bad">missing</span>
                 )}
               </label>
               <input name={k} type={k.endsWith("_ID") ? "text" : "password"} autocomplete="off" spellcheck={false} />
@@ -823,7 +987,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
                 <td>{ago(q.createdAt)}</td>
                 <td class="msg">{q.question}</td>
                 <td class="msg">
-                  {q.answerable ? "" : <span class="pill warnc">not in help centre</span>} {q.answer}
+                  {q.answerable ? "" : <span class="pill warn">not in help centre</span>} {q.answer}
                 </td>
               </tr>
             ))}
