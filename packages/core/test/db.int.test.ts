@@ -19,8 +19,8 @@ import { DuplicateTracker, runPipeline, VerdictCache } from "../src/pipeline.js"
 const url = process.env.TEST_DATABASE_URL;
 
 describe.skipIf(!url)("database", () => {
-  const { db, sql } = connect(url);
-  afterAll(() => sql.end());
+  const { db, sql } = url ? connect(url) : ({} as ReturnType<typeof connect>);
+  afterAll(() => sql?.end());
 
   it("migrates, seeds once, stores settings, decisions and vectors", async () => {
     await runMigrations(db, sql);

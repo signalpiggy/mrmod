@@ -294,11 +294,16 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
       .from(decisions)
       .where(conds.length ? and(...conds) : undefined)
       .orderBy(desc(decisions.createdAt))
-      .limit(150);
+      .limit(300);
     const ruleRows = await loadRules(db);
+    const settings = await loadSettings(db);
     return c.html(
-      <Layout title="Decisions" path="/decisions">
-        <h1>Decisions</h1>
+      <Layout title="Message log" path="/decisions">
+        <h1>Message log</h1>
+        <p class="hint">
+          {settings.logAllMessages ? "Every message is logged (turn off in Settings)." : "Suspicious messages and a random sample are logged."} Newest first;
+          <a href="">refresh</a> to see new ones. Discord #mod-log only gets messages that match a rule.
+        </p>
         <form class="row card" method="get">
           <select name="rule">
             <option value="">All rules</option>
@@ -568,7 +573,11 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
             <label>
               <input type="checkbox" name="judgeAll" value="1" checked={s.judgeAll} style="width:auto" /> Judge every message from non-exempt members
             </label>
-            <div class="hint">Catches more, costs more. Off by default.</div>
+            <div class="hint">Catches more, costs more. On while testing.</div>
+            <label>
+              <input type="checkbox" name="logAllMessages" value="1" checked={s.logAllMessages} style="width:auto" /> Log every message to the hub's Message log
+            </label>
+            <div class="hint">Turn off once you're happy, so only suspicious messages and a 2% sample are logged.</div>
           </div>
           <label>Server rules the AI judge cites</label>
           <textarea name="serverRules">{s.serverRules}</textarea>
@@ -593,6 +602,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     for (const k of STR_KEYS) next[k] = String(b[k] ?? "").trim();
     for (const k of ID_KEYS) next[k] = String(b[k] ?? "").trim() || null;
     next.judgeAll = b.judgeAll === "1";
+    next.logAllMessages = b.logAllMessages === "1";
     next.serverRules = String(b.serverRules ?? "");
     const parsed = settingsSchema.safeParse({ ...current, ...next });
     if (!parsed.success) return c.redirect(`/settings?error=${encodeURIComponent("Not saved: " + parsed.error.issues.map((i) => i.path.join(".")).join(", "))}`);
