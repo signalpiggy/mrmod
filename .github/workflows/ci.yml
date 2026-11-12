@@ -1,0 +1,106 @@
+name: CI and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: mrmod_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/mrmod_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mrmod/core build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  deploy:
+    needs: test
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    # Only SSH access lives in GitHub. Discord/OpenAI credentials are entered in the hub on the VPS.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy secrets
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          missing=""
+          for v in VPS_HOST VPS_USER VPS_SSH_KEY; do [ -z "${!v}" ] && missing="$missing $v"; done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing (see DEPLOY.md)"; exit 1; fi
+
+      - name: Build images
+        run: |
+          docker build --target bot -t mrmod-bot:${IMAGE_TAG} .
+          docker build --target hub -t mrmod-hub:${IMAGE_TAG} .
+
+      - name: Set up SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          if [ -n "$VPS_HOST_KEY" ]; then printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+          else ssh-keyscan -p "$VPS_PORT" "$VPS_HOST" > ~/.ssh/known_hosts 2>/dev/null; fi
+          printf 'Host vps\n  HostName %s\n  Port %s\n  User %s\n  IdentityFile ~/.ssh/id_deploy\n  ServerAliveInterval 30\n' "$VPS_HOST" "$VPS_PORT" "$VPS_USER" > ~/.ssh/config
+
+      - name: Prepare VPS (Docker, internal secrets, ports)
+        run: ssh vps 'bash -s' -- "${{ vars.HUB_DOMAIN }}" < deploy/bootstrap.sh
+
+      - name: Upload images and compose file
+        run: |
+          docker save mrmod-bot:${IMAGE_TAG} mrmod-hub:${IMAGE_TAG} | gzip | ssh vps 'gunzip | docker load'
+          scp docker-compose.yml deploy/Caddyfile vps:~/mrmod/
+
+      - name: Restart stack
+        run: |
+          ssh vps "cd ~/mrmod && IMAGE_TAG=${IMAGE_TAG} docker compose up -d --remove-orphans && docker image prune -f >/dev/null"
+
+      - name: Health check
+        run: |
+          sleep 25
+          ssh vps 'cd ~/mrmod && docker compose ps --format "table {{.Service}}\t{{.Status}}"'
+          echo "--- bot ---"
+          ssh vps 'cd ~/mrmod && docker compose logs --tail 30 bot'
+          echo "--- hub ---"
+          # The one-time setup code is printed only until the hub admin password is set.
+          ssh vps 'cd ~/mrmod && docker compose logs --tail 30 hub' | tee /tmp/hub.txt
+          echo "Hub: https://$(ssh vps 'grep ^HUB_DOMAIN= ~/mrmod/.env | cut -d= -f2'):8443"
+          for s in bot hub caddy db; do
+            ssh vps "cd ~/mrmod && docker compose ps --status running --services" | grep -qx "$s" || { echo "::error::$s is not running"; exit 1; }
+          done
