@@ -5,10 +5,12 @@ import {
   answerQuestion,
   formatAnswer,
   insertDecision,
+  knownSpecialCase,
   looksLikeQuestion,
   runPipeline,
   setModlogMessage,
   setSuggestedAnswer,
+  specialReply,
   type BotCommand,
   type Decision,
   type MessageInput,
@@ -91,18 +93,53 @@ export async function handleMessage(state: BotState, message: Message<true>) {
   if (decision.match?.action.alert && decision.match.mode === "enforce") {
     await postAlert(message.client, state, id, decision, executed).catch((err) => log.error("alert post failed", err));
   }
-  if (wantsSuggestion(state, message, decision)) await suggestAnswer(state, id, decision);
+  const plan = replyPlan(state, message, decision);
+  if (plan?.kind === "special") await suggestSpecial(state, id, decision, plan.caseName);
+  else if (plan?.kind === "answer") await suggestAnswer(state, id, decision);
 }
 
-/** Shadow Q&A: draft the reply the bot would give to a question, for review in the hub. Never posted. */
-function wantsSuggestion(state: BotState, message: Message<true>, d: Decision): boolean {
-  if (!state.settings.suggestAnswers || d.match) return false;
-  if (message.client.user && message.mentions.users.has(message.client.user.id)) return false; // answered for real
+/**
+ * Shadow replies, drafted for review in the hub and never posted: an admin special case wins,
+ * then the ignore list (greetings, small talk), then help questions answered from the knowledge base.
+ */
+function replyPlan(state: BotState, message: Message<true>, d: Decision): { kind: "special"; caseName: string } | { kind: "answer" } | null {
+  const s = state.settings;
+  if (!s.suggestAnswers || d.match) return null;
+  if (message.client.user && message.mentions.users.has(message.client.user.id)) return null; // answered for real
   const v = d.verdict;
-  if (v && v.verdict !== "ok") return false;
+  if (v && v.verdict !== "ok") return null;
+  const caseName = knownSpecialCase(s.specialCases, v?.special_case);
+  if (caseName) {
+    log.info(`suggest #${d.input.messageId}: special case "${caseName}"`);
+    return { kind: "special", caseName };
+  }
+  if (v?.ignore) {
+    log.info(`suggest #${d.input.messageId}: ignored (matches ignore list)`);
+    return null;
+  }
   const yes = Boolean(v?.is_question) || looksLikeQuestion(d.input.content);
   log.info(`suggest #${d.input.messageId}: ${yes ? "drafting" : "not a question"} (judge is_question=${String(v?.is_question)})`);
-  return yes;
+  return yes ? { kind: "answer" } : null;
+}
+
+async function suggestSpecial(state: BotState, id: number, d: Decision, caseName: string) {
+  try {
+    const r = await specialReply(state.settings, d.input.content, caseName);
+    log.info(`special case "${caseName}" for decision ${id}: ${r.action} (${r.latencyMs}ms)`);
+    await setSuggestedAnswer(state.db, id, {
+      kind: "special",
+      specialCase: caseName,
+      ignored: r.action === "ignore",
+      answerable: true,
+      text: r.action === "reply" ? formatAnswer({ answerable: true, text: r.text, sources: [] }, state.settings) : "",
+      sources: [],
+      model: r.model,
+      latencyMs: r.latencyMs,
+    });
+  } catch (err) {
+    log.warn("special-case reply failed", err);
+    await setSuggestedAnswer(state.db, id, { kind: "special", specialCase: caseName, answerable: false, text: "", sources: [], error: String(err).slice(0, 300) }).catch(() => {});
+  }
 }
 
 async function suggestAnswer(state: BotState, id: number, d: Decision) {
@@ -110,6 +147,7 @@ async function suggestAnswer(state: BotState, id: number, d: Decision) {
     const a = await answerQuestion(state.db, state.settings, d.input.content, { userId: d.input.authorId, channelId: d.input.channelId }, { log: false });
     log.info(`suggested answer for decision ${id}: ${a.answerable ? "answered" : "not in help centre"} (${a.sources.length} links, ${a.latencyMs}ms)`);
     await setSuggestedAnswer(state.db, id, {
+      kind: "answer",
       answerable: a.answerable,
       text: formatAnswer(a, state.settings),
       sources: a.sources,

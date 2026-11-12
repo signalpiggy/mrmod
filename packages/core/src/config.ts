@@ -27,6 +27,12 @@ export const settingsSchema = z.object({
         "Write in plain, friendly English. Reply in the language the question was asked in.",
       ].join("\n"),
     ),
+  /** Messages that are neither questions nor violations and should get no reply (judge sets ignore=true). */
+  ignorePrompt: z
+    .string()
+    .default("Greetings and small talk: gm, gn, hello, hi, good morning, welcome, thanks, emoji-only messages, short reactions like 'lol', 'nice', 'wen moon'."),
+  /** Admin special cases, one per line as "Name: instruction" (e.g. ignore, or reply like this). */
+  specialCases: z.string().default(""),
   /** How each source link is written under an answer. {url} and {title} are replaced. Wrap the URL in <> to stop Discord's preview card. */
   answerLinkFormat: z.string().default("🔗 <{url}>"),
   /** Longest answer text (before links and footer). */

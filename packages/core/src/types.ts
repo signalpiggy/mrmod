@@ -18,6 +18,10 @@ export interface JudgeVerdict {
   reason: string;
   /** The judge thinks this is a genuine help question (used for suggested answers). */
   is_question?: boolean;
+  /** Matches the admin's "messages to ignore" list (greetings, small talk). */
+  ignore?: boolean;
+  /** Name of the admin's special case this message matches, if any. */
+  special_case?: string | null;
   /** "llm" when the model judged it, "heuristic" when we fell back to patterns. */
   source?: "llm" | "heuristic";
 }
@@ -93,6 +97,11 @@ export interface MessageInput {
 
 /** What the bot would have replied to a question (shadow), stored on the decision. */
 export interface SuggestedAnswer {
+  /** "answer" = from the knowledge base; "special" = an admin special case (reply or ignore). */
+  kind?: "answer" | "special";
+  /** Special case name, and whether its instruction said to ignore the message. */
+  specialCase?: string;
+  ignored?: boolean;
   answerable: boolean;
   /** Full Discord-formatted reply, including links and footer. */
   text: string;
