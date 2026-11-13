@@ -1,6 +1,7 @@
 // Backtest: read recent server history, pick conversation-starting messages, and replay them through
 // the live pipeline as a dry run. Read-only in Discord: nothing is deleted, posted, or logged to #mod-log.
 import {
+  BACKTEST_CHANNELS_KEY,
   BACKTEST_KEY,
   collectLatestStarters,
   createReplayer,
@@ -9,6 +10,7 @@ import {
   type BacktestCommand,
   type BacktestResult,
   type BacktestRun,
+  type ChannelInfo,
   type HistoryMessage,
   type HistorySource,
   type MessageInput,
@@ -38,6 +40,49 @@ function toHistory(m: Message): HistoryMessage {
   };
 }
 
+const KIND: Partial<Record<ChannelType, ChannelInfo["kind"]>> = {
+  [ChannelType.GuildText]: "text",
+  [ChannelType.GuildAnnouncement]: "announcement",
+  [ChannelType.PublicThread]: "thread",
+  [ChannelType.AnnouncementThread]: "thread",
+  [ChannelType.GuildForum]: "forum",
+  [ChannelType.GuildVoice]: "voice",
+};
+
+/** Every text-like channel and open thread, whether the backtest can read it, and why not. */
+export async function listChannels(client: Client, guildId: string, settings: BotState["settings"]): Promise<{ info: ChannelInfo[]; readable: Readable[] }> {
+  const guild = await client.guilds.fetch(guildId);
+  const me = await guild.members.fetchMe();
+  const all = [...(await guild.channels.fetch()).values()].filter((c) => c !== null);
+  const threads = await guild.channels.fetchActiveThreads().then((t) => [...t.threads.values()]).catch(() => []);
+  const info: ChannelInfo[] = [];
+  const readable: Readable[] = [];
+  for (const c of [...all, ...threads]) {
+    const kind = KIND[c.type];
+    if (!kind) continue;
+    const perms = c.permissionsFor(me);
+    let why: string | null = null;
+    if (kind === "forum") why = "forum: its open posts are listed as threads";
+    else if (!perms?.has(PermissionFlagsBits.ViewChannel)) why = "bot can't see this channel";
+    else if (!perms.has(PermissionFlagsBits.ReadMessageHistory)) why = "bot lacks Read Message History here";
+    const note =
+      c.id === settings.modlogChannelId ? "mod log" : c.id === settings.alertChannelId ? "alert channel" : settings.exemptChannelIds.includes(c.id) ? "exempt in Settings" : null;
+    info.push({ id: c.id, name: c.name, parent: c.parent?.name ?? null, kind, readable: !why, note: why ?? note });
+    if (!why) readable.push(c as unknown as Readable);
+  }
+  return { info, readable };
+}
+
+/** Keeps the hub's channel picker up to date. */
+export async function publishChannels(state: BotState, client: Client, guildId: string) {
+  try {
+    const { info } = await listChannels(client, guildId, state.settings);
+    await setRuntime(state.db, BACKTEST_CHANNELS_KEY, { at: new Date().toISOString(), channels: info });
+  } catch (err) {
+    log.warn("backtest: listing channels failed", err);
+  }
+}
+
 export async function runBacktest(state: BotState, client: Client, guildId: string, cmd: BacktestCommand) {
   if (running) return log.warn("backtest already running; ignoring new request");
   running = true;
@@ -49,6 +94,7 @@ export async function runBacktest(state: BotState, client: Client, guildId: stri
     from: cmd.from,
     to: cmd.to,
     tz: cmd.tz,
+    channelIds: cmd.channelIds,
     startedAt: new Date().toISOString(),
     phase: "Reading channel history",
     channelsScanned: 0,
@@ -62,19 +108,12 @@ export async function runBacktest(state: BotState, client: Client, guildId: stri
   await save();
   try {
     const guild = await client.guilds.fetch(guildId);
-    const me = await guild.members.fetchMe();
-    const skip = new Set([...settings.exemptChannelIds, settings.modlogChannelId, settings.alertChannelId].filter(Boolean) as string[]);
-    const all = [...(await guild.channels.fetch()).values()].filter((c) => c !== null);
-    const threads = await guild.channels.fetchActiveThreads().then((t) => [...t.threads.values()]).catch(() => []);
-    const readable = [...all, ...threads].filter(
-      (c) =>
-        (c.type === ChannelType.GuildText ||
-          c.type === ChannelType.GuildAnnouncement ||
-          c.type === ChannelType.PublicThread ||
-          c.type === ChannelType.AnnouncementThread) &&
-        !skip.has(c.id) &&
-        c.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]),
-    ) as unknown as Readable[];
+    const { info, readable: all } = await listChannels(client, guildId, settings);
+    void setRuntime(state.db, BACKTEST_CHANNELS_KEY, { at: new Date().toISOString(), channels: info }).catch(() => {});
+    const wanted = new Set(cmd.channelIds);
+    // A channel picked by hand is read even if it's exempt or the mod log; otherwise those are left out.
+    const readable = wanted.size ? all.filter((c) => wanted.has(c.id)) : all.filter((c) => !info.find((i) => i.id === c.id)?.note);
+    if (wanted.size && !readable.length) throw new Error("the bot can't read any of the chosen channels (see the channel list for why)");
 
     const byId = new Map<string, Message>();
     const sources: HistorySource<Readable>[] = readable.map((ch) => ({

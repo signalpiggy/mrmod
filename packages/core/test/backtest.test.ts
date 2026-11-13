@@ -35,7 +35,8 @@ describe("conversation starters", () => {
 
 describe("backtest command", () => {
   it("parses and clamps", () => {
-    expect(parseBacktestCommand(JSON.stringify({ type: "backtest", count: 5000, actor: "x" }))).toEqual({ type: "backtest", count: 2000, from: null, to: null, actor: "x", tz: 0 });
+    expect(parseBacktestCommand(JSON.stringify({ type: "backtest", count: 5000, actor: "x" }))).toEqual({ type: "backtest", count: 2000, from: null, to: null, channelIds: [], actor: "x", tz: 0 });
+    expect(parseBacktestCommand(JSON.stringify({ type: "backtest", channelIds: ["123456789012345678", "bad", 5] }))?.channelIds).toEqual(["123456789012345678"]);
     const r = parseBacktestCommand(JSON.stringify({ type: "backtest", count: 300, from: "2026-11-10T00:00:00Z", to: "2026-11-01T00:00:00Z", tz: -240 }));
     expect([r?.from, r?.to, r?.tz]).toEqual(["2026-11-01T00:00:00.000Z", "2026-11-10T00:00:00.000Z", -240]);
     expect(parseBacktestCommand(JSON.stringify({ type: "ban", decisionId: 1 }))).toBeNull();
