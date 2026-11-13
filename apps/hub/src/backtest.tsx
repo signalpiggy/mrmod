@@ -1,5 +1,5 @@
 // Backtesting tab: replays recent conversation-starting messages through the pipeline (dry run, in the bot) and shows what Mr Mod would have done.
-import { audit, BACKTEST_COUNTS, BACKTEST_DEFAULT_COUNT, BACKTEST_KEY, getRuntime, summarizeBacktest, type BacktestResult, type BacktestRun, type DB } from "@mrmod/core";
+import { audit, BACKTEST_CHANNELS_KEY, BACKTEST_COUNTS, BACKTEST_DEFAULT_COUNT, BACKTEST_KEY, getRuntime, summarizeBacktest, type BacktestResult, type BacktestRun, type ChannelInfo, type DB } from "@mrmod/core";
 import { sql as dsql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { ago, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
@@ -17,6 +17,13 @@ const BT_CSS = `
 .bt-form .field{width:170px}
 .bt-form select,.bt-form input{padding:7px 9px}
 .bt-form .hint{flex-basis:100%}
+.bt-chans{flex-basis:100%}
+.bt-chans summary{cursor:pointer;font-weight:600;font-size:13px}
+.bt-chans fieldset{border:0;padding:0;margin:10px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.bt-chans legend{font:700 11px var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0;margin-bottom:6px}
+.bt-chans .chk{padding:5px 10px;font-size:13px}
+.bt-chans .chk.off{opacity:.55;cursor:not-allowed}
+.bt-chans .why{font-size:11.5px;color:var(--muted);margin-left:2px}
 .bt-warn{padding:10px 22px;background:var(--sunbg);color:var(--sunink);font-weight:600}
 .bt-sum{display:flex;gap:10px;flex-wrap:wrap;padding:12px 22px;background:var(--surf);border-bottom:1px solid var(--line)}
 .bt-sum .s{display:grid;gap:0;padding:8px 14px;border-radius:12px;background:var(--surf2);min-width:96px}
@@ -74,6 +81,11 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
   app.get("/backtest", async (c) => {
     const row = await getRuntime<BacktestRun>(db, BACKTEST_KEY);
     const run = row?.value ?? null;
+    const chanRow = await getRuntime<{ channels: ChannelInfo[] }>(db, BACKTEST_CHANNELS_KEY);
+    const channels = (chanRow?.value.channels ?? []).slice().sort((a, b) => (a.parent ?? "").localeCompare(b.parent ?? "") || a.name.localeCompare(b.name));
+    const chosen = new Set(run?.channelIds ?? []);
+    const groups = [...new Set(channels.map((ch) => ch.parent ?? "No category"))];
+    const nameOf = (id: string) => channels.find((ch) => ch.id === id)?.name ?? id;
     // A run whose bot died mid-way stops updating; treat it as stalled after 10 minutes of silence.
     const stalled = run?.status === "running" && Date.now() - row!.updatedAt.getTime() > 10 * 60_000;
     const running = run?.status === "running" && !stalled;
@@ -89,7 +101,7 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
           <h1>Backtesting</h1>
           <span class="hint">
             {run
-              ? `${run.status === "done" ? "Last run" : running ? "Running since" : "Run started"} ${ago(run.startedAt)} · ${results.length} messages${span(results, run.tz ?? 0)} · ${run.channelsScanned} channels`
+              ? `${run.status === "done" ? "Last run" : running ? "Running since" : "Run started"} ${ago(run.startedAt)} · ${results.length} messages${span(results, run.tz ?? 0)} · ${run.channelIds?.length ? `in ${run.channelIds.map((id) => `#${nameOf(id)}`).join(", ")}` : `${run.channelsScanned} channels`}`
               : "No run yet"}
           </span>
           <div class="right">
@@ -117,8 +129,35 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
           </div>
           <input type="hidden" name="tz" value="0" />
           <button disabled={running || undefined}>{running ? "Running…" : "Run backtest"}</button>
+          <details class="bt-chans" open={chosen.size > 0 || undefined}>
+            <summary>
+              Channels: <b>{chosen.size ? [...chosen].map((id) => `#${nameOf(id)}`).join(", ") : "all the bot can read"}</b>
+            </summary>
+            {channels.length === 0 ? (
+              <p class="hint">The bot hasn't reported its channel list yet. It does within a minute of starting; refresh shortly.</p>
+            ) : (
+              <>
+                <p class="hint">Tick channels to test only those, or leave all unticked for every readable channel. Greyed-out channels can't be read, with the reason shown.</p>
+                {groups.map((g) => (
+                  <fieldset>
+                    <legend>{g}</legend>
+                    {channels
+                      .filter((ch) => (ch.parent ?? "No category") === g)
+                      .map((ch) => (
+                        <label class={`chk${ch.readable ? "" : " off"}`} title={ch.note ?? undefined}>
+                          <input type="checkbox" name="channel" value={ch.id} checked={chosen.has(ch.id) || undefined} disabled={!ch.readable || undefined} />
+                          {ch.kind === "thread" ? "🧵 " : "#"}
+                          {ch.name}
+                          {ch.note && <span class="why">{ch.note}{ch.visibleTo?.length ? ` (give it @${ch.visibleTo[0]})` : ""}</span>}
+                        </label>
+                      ))}
+                  </fieldset>
+                ))}
+              </>
+            )}
+          </details>
           <p class="hint">
-            Takes the newest conversation starters across all channels. With dates set, the newest ones inside that range (both days included).
+            Takes the newest conversation starters in the chosen channels. With dates set, the newest ones inside that range (both days included).
           </p>
           <script dangerouslySetInnerHTML={{ __html: "document.querySelector('.bt-form [name=tz]').value=String(new Date().getTimezoneOffset())" }} />
         </form>
@@ -317,7 +356,7 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
     if (!fresh) return back("Not started: the bot isn't online right now. Check the Keys page.");
     const row = await getRuntime<BacktestRun>(db, BACKTEST_KEY);
     if (row?.value.status === "running" && Date.now() - row.updatedAt.getTime() < 10 * 60_000) return back("A backtest is already running.");
-    const body = await c.req.parseBody();
+    const body = await c.req.parseBody({ all: true });
     const count = (BACKTEST_COUNTS as readonly number[]).includes(Number(body.count)) ? Number(body.count) : BACKTEST_DEFAULT_COUNT;
     const tz = Math.max(-840, Math.min(840, Math.round(Number(body.tz) || 0)));
     // Date inputs are days in the admin's timezone: from = start of that day, to = end of that day.
@@ -328,7 +367,9 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
     const from = day(body.from, 0);
     const to = day(body.to, 1);
     if (from && to && from >= to) return back("Not started: the From date is after the To date.");
-    const cmd = { type: "backtest", count, from, to, tz, actor: "hub admin" };
+    const raw = body["channel"];
+    const channelIds = (Array.isArray(raw) ? raw : raw ? [raw] : []).map(String).filter((id) => /^\d{5,25}$/.test(id)).slice(0, 100);
+    const cmd = { type: "backtest", count, from, to, tz, channelIds, actor: "hub admin" };
     await audit(db, c.get("actor"), "admin", "backtest.run", undefined, cmd);
     await db.execute(dsql`SELECT pg_notify('mrmod_cmd', ${JSON.stringify(cmd)})`);
     return back("Backtest started. Reading channel history first; this page updates as it goes.");

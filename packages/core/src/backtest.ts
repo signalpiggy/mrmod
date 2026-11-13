@@ -84,6 +84,8 @@ export interface BacktestRun {
   to?: string | null;
   /** The page limit cut reading short, so older qualifying messages may be missing. */
   truncated?: boolean;
+  /** Channels asked for (empty = all). */
+  channelIds?: string[];
   /** Timezone offset (minutes, as getTimezoneOffset) of whoever started the run. */
   tz?: number;
   startedAt: string;
@@ -100,12 +102,35 @@ export interface BacktestRun {
   results: BacktestResult[];
 }
 
-/** Hub -> bot: start a backtest. */
 export const BACKTEST_COUNTS = [100, 300, 500, 1000, 2000] as const;
 export const BACKTEST_MAX_COUNT = 2000;
 
+/** Runtime key: the server's channels as the bot sees them, for the Backtest channel picker. */
+export const BACKTEST_CHANNELS_KEY = "backtest_channels";
+
+export interface ChannelInfo {
+  id: string;
+  name: string;
+  /** Category name, or the parent channel's name for a thread. */
+  parent: string | null;
+  kind: "text" | "announcement" | "thread" | "forum" | "voice";
+  /** The backtest can read this channel's history. */
+  readable: boolean;
+  /** Why it can't be read, or a note (exempt, mod log). */
+  note: string | null;
+  /** @everyone can see it. */
+  public?: boolean;
+  /** When the bot can't see it: roles (not admin/bot roles) that can, lowest first. */
+  visibleTo?: string[];
+}
+
+/** Channels the bot can't see, so it never moderates them. */
+export function unseenChannels(channels: ChannelInfo[]): ChannelInfo[] {
+  return channels.filter((c) => c.note === "bot can't see this channel");
+}
+
 /** Hub -> bot: start a backtest. Takes the newest `count` starters, optionally only those sent between `from` and `to` (ISO times). */
-export type BacktestCommand = { type: "backtest"; count: number; from: string | null; to: string | null; actor: string; /** Viewer's getTimezoneOffset(), for showing dates. */ tz: number };
+export type BacktestCommand = { type: "backtest"; count: number; from: string | null; to: string | null; /** Only these channels; empty = all readable. */ channelIds: string[]; actor: string; /** Viewer's getTimezoneOffset(), for showing dates. */ tz: number };
 
 function isoOrNull(v: unknown): string | null {
   if (typeof v !== "string" || !v) return null;
@@ -122,7 +147,8 @@ export function parseBacktestCommand(payload: string): BacktestCommand | null {
     let to = isoOrNull(c.to);
     if (from && to && from > to) [from, to] = [to, from];
     const tz = Math.max(-840, Math.min(840, Math.round(Number(c.tz) || 0)));
-    return { type: "backtest", count, from, to, actor: typeof c.actor === "string" ? c.actor.slice(0, 100) : "hub", tz };
+    const channelIds = Array.isArray(c.channelIds) ? c.channelIds.filter((x): x is string => typeof x === "string" && /^\d{5,25}$/.test(x)).slice(0, 100) : [];
+    return { type: "backtest", count, from, to, channelIds, actor: typeof c.actor === "string" ? c.actor.slice(0, 100) : "hub", tz };
   } catch {
     return null;
   }

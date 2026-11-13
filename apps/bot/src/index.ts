@@ -11,7 +11,7 @@ import {
   type SecretValues,
 } from "@mrmod/core";
 import { Client, Events, GatewayIntentBits, Partials, REST, Routes } from "discord.js";
-import { runBacktest } from "./backtest.js";
+import { publishChannels, runBacktest } from "./backtest.js";
 import { answerMention, COMMANDS, handleInteraction } from "./interactions.js";
 import { log } from "./log.js";
 import { handleMessage, runHubCommand } from "./moderation.js";
@@ -93,7 +93,9 @@ async function main() {
     log.info(`logged in as ${c.user.tag}`);
     if (!c.guilds.cache.has(guildId)) log.warn(`bot is not in server ${guildId}; use the invite link from the hub`);
     void heartbeat();
+    void publishChannels(state, c, guildId);
   });
+  setInterval(() => void publishChannels(state, client, guildId), 15 * 60_000);
   setInterval(heartbeat, 60_000);
 
   client.on(Events.MessageCreate, (message) => {
