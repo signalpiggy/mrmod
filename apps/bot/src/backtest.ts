@@ -2,6 +2,7 @@
 // the live pipeline as a dry run. Read-only in Discord: nothing is deleted, posted, or logged to #mod-log.
 import {
   BACKTEST_KEY,
+  collectLatestStarters,
   createReplayer,
   isConversationStarter,
   setRuntime,
@@ -9,14 +10,15 @@ import {
   type BacktestResult,
   type BacktestRun,
   type HistoryMessage,
+  type HistorySource,
   type MessageInput,
 } from "@mrmod/core";
 import { ChannelType, MessageType, PermissionFlagsBits, type Client, type Collection, type GuildMember, type Message } from "discord.js";
 import { log } from "./log.js";
 import type { BotState } from "./state.js";
 
-/** History pages (100 messages each) read per channel. */
-const PAGES_PER_CHANNEL = 10;
+/** Safety stop: history pages (100 messages each) read across all channels. */
+const MAX_PAGES = 3000;
 const CONCURRENCY = 4;
 
 let running = false;
@@ -36,18 +38,6 @@ function toHistory(m: Message): HistoryMessage {
   };
 }
 
-async function readChannel(ch: Readable): Promise<{ messages: Message[]; complete: boolean }> {
-  const out: Message[] = [];
-  let before: string | undefined;
-  for (let page = 0; page < PAGES_PER_CHANNEL; page++) {
-    const batch = await ch.messages.fetch({ limit: 100, before });
-    out.push(...batch.values());
-    if (batch.size < 100) return { messages: out, complete: true };
-    before = batch.last()?.id;
-  }
-  return { messages: out, complete: false };
-}
-
 export async function runBacktest(state: BotState, client: Client, guildId: string, cmd: BacktestCommand) {
   if (running) return log.warn("backtest already running; ignoring new request");
   running = true;
@@ -56,6 +46,9 @@ export async function runBacktest(state: BotState, client: Client, guildId: stri
     status: "running",
     requestedBy: cmd.actor,
     requested: cmd.count,
+    from: cmd.from,
+    to: cmd.to,
+    tz: cmd.tz,
     startedAt: new Date().toISOString(),
     phase: "Reading channel history",
     channelsScanned: 0,
@@ -83,34 +76,39 @@ export async function runBacktest(state: BotState, client: Client, guildId: stri
         c.permissionsFor(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]),
     ) as unknown as Readable[];
 
-    type Cand = { m: Message; ch: Readable; history: HistoryMessage[] };
-    const cands: Cand[] = [];
-    for (const ch of readable) {
-      run.phase = `Reading #${ch.name}`;
-      let res: { messages: Message[]; complete: boolean };
-      try {
-        res = await readChannel(ch);
-      } catch (err) {
-        log.warn(`backtest: can't read #${ch.name}`, err);
-        continue;
-      }
-      run.channelsScanned++;
-      run.messagesScanned += res.messages.length;
-      const history = res.messages.map(toHistory);
-      // Without the full window before it, a message near the start of what we read can't be judged as a starter.
-      const oldest = Math.min(...history.map((h) => h.createdAt.getTime()));
-      const floor = res.complete ? -Infinity : oldest + 10 * 60_000;
-      res.messages.forEach((m, i) => {
-        const h = history[i]!;
-        if (h.authorIsBot || !m.content.trim() || h.createdAt.getTime() < floor) return;
-        if (m.type !== MessageType.Default && m.type !== MessageType.Reply) return;
-        if (isConversationStarter(h, history).starter) cands.push({ m, ch, history });
-      });
-      if (run.channelsScanned % 5 === 0) await save();
-    }
-
-    const picked = cands.sort((a, b) => b.m.createdTimestamp - a.m.createdTimestamp).slice(0, cmd.count);
-    run.startersFound = cands.length;
+    const byId = new Map<string, Message>();
+    const sources: HistorySource<Readable>[] = readable.map((ch) => ({
+      key: ch,
+      fetch: async (before) => {
+        const batch = await ch.messages.fetch({ limit: 100, before });
+        return [...batch.values()].map((m) => {
+          byId.set(m.id, m);
+          return toHistory(m);
+        });
+      },
+    }));
+    const eligibleTypes = new Set([MessageType.Default, MessageType.Reply]);
+    const collected = await collectLatestStarters(sources, {
+      count: cmd.count,
+      from: cmd.from ? Date.parse(cmd.from) : null,
+      to: cmd.to ? Date.parse(cmd.to) : null,
+      maxPages: MAX_PAGES,
+      eligible: (h) => {
+        const m = byId.get(h.id);
+        return Boolean(m && !h.authorIsBot && m.content.trim() && eligibleTypes.has(m.type));
+      },
+      onPage: async (p) => {
+        run.messagesScanned = p.messages;
+        run.startersFound = p.starters;
+        run.phase = `Reading history (#${(p.channel as Readable).name}, ${p.pages} pages so far)`;
+        if (p.pages % 10 === 0) await save();
+      },
+    });
+    run.channelsScanned = collected.channelsRead;
+    run.messagesScanned = collected.messages;
+    run.startersFound = collected.starters;
+    run.truncated = collected.truncated;
+    const picked = collected.picked.map((p) => ({ m: byId.get(p.message.id)!, ch: p.key, history: p.history }));
     run.phase = `Fetching ${new Set(picked.map((p) => p.m.author.id)).size} members`;
     await save();
 
@@ -130,7 +128,7 @@ export async function runBacktest(state: BotState, client: Client, guildId: stri
       while (next < ordered.length) {
         const { m, ch, history } = ordered[next++]!;
         const member = members.get(m.author.id) ?? null;
-        const before = history.filter((h) => h.createdAt < m.createdAt).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 20);
+        const before = [...history].reverse(); // newest first
         const input: MessageInput = {
           guildId,
           channelId: m.channelId,

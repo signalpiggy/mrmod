@@ -1,5 +1,5 @@
 // Backtesting tab: replays recent conversation-starting messages through the pipeline (dry run, in the bot) and shows what Mr Mod would have done.
-import { audit, BACKTEST_DEFAULT_COUNT, BACKTEST_KEY, getRuntime, summarizeBacktest, type BacktestResult, type BacktestRun, type DB } from "@mrmod/core";
+import { audit, BACKTEST_COUNTS, BACKTEST_DEFAULT_COUNT, BACKTEST_KEY, getRuntime, summarizeBacktest, type BacktestResult, type BacktestRun, type DB } from "@mrmod/core";
 import { sql as dsql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { ago, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
@@ -13,6 +13,11 @@ const FILTERS: [string, string, (r: BacktestResult) => boolean][] = [
 ];
 
 const BT_CSS = `
+.bt-form{margin:0;display:flex;gap:12px;align-items:end;flex-wrap:wrap;padding:12px 22px;background:var(--surf);border-bottom:1px solid var(--line)}
+.bt-form .field{width:170px}
+.bt-form select,.bt-form input{padding:7px 9px}
+.bt-form .hint{flex-basis:100%}
+.bt-warn{padding:10px 22px;background:var(--sunbg);color:var(--sunink);font-weight:600}
 .bt-sum{display:flex;gap:10px;flex-wrap:wrap;padding:12px 22px;background:var(--surf);border-bottom:1px solid var(--line)}
 .bt-sum .s{display:grid;gap:0;padding:8px 14px;border-radius:12px;background:var(--surf2);min-width:96px}
 .bt-sum .s b{font:800 22px/1.15 var(--display);font-variant-numeric:tabular-nums}
@@ -23,6 +28,22 @@ const BT_CSS = `
 .bt-bar i{display:block;height:100%;background:var(--mint)}
 .tq-item .out{font:700 11px var(--display);letter-spacing:.04em;text-transform:uppercase}
 `;
+
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** Date and time in the run starter's timezone (tz = getTimezoneOffset minutes). */
+function fmt(iso: string, tz: number): string {
+  const d = new Date(Date.parse(iso) - tz * 60_000);
+  return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+/** yyyy-mm-dd for a date input; `end` turns an exclusive end time back into the last day included. */
+function localDate(iso: string, tz: number, end = false): string {
+  return new Date(Date.parse(iso) - tz * 60_000 - (end ? 1 : 0)).toISOString().slice(0, 10);
+}
+function span(results: BacktestResult[], tz: number): string {
+  if (!results.length) return "";
+  const times = results.map((r) => r.createdAt).sort();
+  return ` sent ${fmt(times[0]!, tz)} to ${fmt(times[times.length - 1]!, tz)}`;
+}
 
 function outcomeLabel(r: BacktestResult): [string, Kind] {
   if (r.outcome === "act") {
@@ -68,31 +89,52 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
           <h1>Backtesting</h1>
           <span class="hint">
             {run
-              ? `${run.status === "done" ? "Last run" : running ? "Running since" : "Run started"} ${ago(run.startedAt)} · ${results.length} messages from ${run.channelsScanned} channels`
+              ? `${run.status === "done" ? "Last run" : running ? "Running since" : "Run started"} ${ago(run.startedAt)} · ${results.length} messages${span(results, run.tz ?? 0)} · ${run.channelsScanned} channels`
               : "No run yet"}
           </span>
           <div class="right">
             {run && <ModePill mode={run.globalMode} />}
-            <form method="post" action="/backtest">
-              <button class="small" disabled={running || undefined}>
-                {running ? "Running…" : run ? `Run again on last ${BACKTEST_DEFAULT_COUNT}` : `Run on last ${BACKTEST_DEFAULT_COUNT}`}
-              </button>
-            </form>
           </div>
         </div>
+        <form method="post" action="/backtest" class="bt-form">
+          <div class="field">
+            <label for="bt-count">Messages</label>
+            <select id="bt-count" name="count">
+              {BACKTEST_COUNTS.map((n) => (
+                <option value={String(n)} selected={(run?.requested ?? BACKTEST_DEFAULT_COUNT) === n || undefined}>
+                  Latest {n}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div class="field">
+            <label for="bt-from">From (optional)</label>
+            <input id="bt-from" type="date" name="from" value={run?.from ? localDate(run.from, run.tz ?? 0) : ""} />
+          </div>
+          <div class="field">
+            <label for="bt-to">To (optional)</label>
+            <input id="bt-to" type="date" name="to" value={run?.to ? localDate(run.to, run.tz ?? 0, true) : ""} />
+          </div>
+          <input type="hidden" name="tz" value="0" />
+          <button disabled={running || undefined}>{running ? "Running…" : "Run backtest"}</button>
+          <p class="hint">
+            Takes the newest conversation starters across all channels. With dates set, the newest ones inside that range (both days included).
+          </p>
+          <script dangerouslySetInnerHTML={{ __html: "document.querySelector('.bt-form [name=tz]').value=String(new Date().getTimezoneOffset())" }} />
+        </form>
 
         {(!run || running || run.status === "error" || stalled) && (
           <div class="bt-run">
             {!run && (
               <>
                 <p>
-                  Replays the last {BACKTEST_DEFAULT_COUNT} messages that <b>started a conversation</b> in the server through Mr Mod's real pipeline (signals, AI
+                  Replays the latest messages that <b>started a conversation</b> in the server through Mr Mod's real pipeline (signals, AI
                   judge, your rules, suggested answers) and shows what it would have done to each.
                 </p>
                 <p class="hint">
                   A message counts as a conversation starter when it isn't a Discord reply, its author hadn't posted in that channel in the previous 10 minutes,
                   and nobody had replied to or @mentioned the author there in those 10 minutes. It's a dry run: nothing is deleted, posted, banned, or sent to
-                  #mod-log. It uses the AI judge, so it costs about as much as {BACKTEST_DEFAULT_COUNT} live messages.
+                  #mod-log. It uses the AI judge, so it costs about as much as the same number of live messages.
                 </p>
               </>
             )}
@@ -118,6 +160,9 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
 
         {results.length > 0 && (
           <>
+            {run?.truncated && (
+              <p class="bt-warn">Stopped after reading 300,000 messages, so this may not reach back far enough. Pick a narrower date range for a complete result.</p>
+            )}
             <div class="bt-sum">
               <div class="s bad">
                 <b>{sum.del}</b>
@@ -185,7 +230,7 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
                           <div>
                             <b>{r.authorTag}</b>
                             <span class="hint">
-                              #{r.channelName ?? "channel"} · {ago(r.createdAt)} · conversation starter
+                              #{r.channelName ?? "channel"} · {fmt(r.createdAt, run?.tz ?? 0)} ({ago(r.createdAt)}) · conversation starter
                             </span>
                           </div>
                           <div class="right">
@@ -272,8 +317,20 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
     if (!fresh) return back("Not started: the bot isn't online right now. Check the Keys page.");
     const row = await getRuntime<BacktestRun>(db, BACKTEST_KEY);
     if (row?.value.status === "running" && Date.now() - row.updatedAt.getTime() < 10 * 60_000) return back("A backtest is already running.");
-    await audit(db, c.get("actor"), "admin", "backtest.run", undefined, { count: BACKTEST_DEFAULT_COUNT });
-    await db.execute(dsql`SELECT pg_notify('mrmod_cmd', ${JSON.stringify({ type: "backtest", count: BACKTEST_DEFAULT_COUNT, actor: "hub admin" })})`);
+    const body = await c.req.parseBody();
+    const count = (BACKTEST_COUNTS as readonly number[]).includes(Number(body.count)) ? Number(body.count) : BACKTEST_DEFAULT_COUNT;
+    const tz = Math.max(-840, Math.min(840, Math.round(Number(body.tz) || 0)));
+    // Date inputs are days in the admin's timezone: from = start of that day, to = end of that day.
+    const day = (v: unknown, plus: number) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ""));
+      return m ? new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]! + plus) + tz * 60_000).toISOString() : null;
+    };
+    const from = day(body.from, 0);
+    const to = day(body.to, 1);
+    if (from && to && from >= to) return back("Not started: the From date is after the To date.");
+    const cmd = { type: "backtest", count, from, to, tz, actor: "hub admin" };
+    await audit(db, c.get("actor"), "admin", "backtest.run", undefined, cmd);
+    await db.execute(dsql`SELECT pg_notify('mrmod_cmd', ${JSON.stringify(cmd)})`);
     return back("Backtest started. Reading channel history first; this page updates as it goes.");
   });
 }

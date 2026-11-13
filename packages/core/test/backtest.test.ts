@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createReplayer, isConversationStarter, parseBacktestCommand, summarizeBacktest, type HistoryMessage } from "../src/backtest.js";
+import { collectLatestStarters, createReplayer, isConversationStarter, snowflakeAt, type HistorySource, parseBacktestCommand, summarizeBacktest, type HistoryMessage } from "../src/backtest.js";
 import { defaultSettings } from "../src/config.js";
 import type { DB } from "../src/db/client.js";
 import { DEFAULT_RULES } from "../src/policy.js";
@@ -35,7 +35,9 @@ describe("conversation starters", () => {
 
 describe("backtest command", () => {
   it("parses and clamps", () => {
-    expect(parseBacktestCommand(JSON.stringify({ type: "backtest", count: 5000, actor: "x" }))).toEqual({ type: "backtest", count: 1000, actor: "x" });
+    expect(parseBacktestCommand(JSON.stringify({ type: "backtest", count: 5000, actor: "x" }))).toEqual({ type: "backtest", count: 2000, from: null, to: null, actor: "x", tz: 0 });
+    const r = parseBacktestCommand(JSON.stringify({ type: "backtest", count: 300, from: "2026-11-10T00:00:00Z", to: "2026-11-01T00:00:00Z", tz: -240 }));
+    expect([r?.from, r?.to, r?.tz]).toEqual(["2026-11-01T00:00:00.000Z", "2026-11-10T00:00:00.000Z", -240]);
     expect(parseBacktestCommand(JSON.stringify({ type: "ban", decisionId: 1 }))).toBeNull();
     expect(parseBacktestCommand("recrawl")).toBeNull();
   });
@@ -90,5 +92,60 @@ describe("replay (dry run)", () => {
     const r = await replayer({})(input("gm everyone"), sentAt);
     expect(r.outcome).toBe("allow");
     expect(summarizeBacktest([r]).allow).toBe(1);
+  });
+});
+
+describe("collecting the latest starters across channels", () => {
+  // Fake channel: messages oldest first; fetch(before) pages newest first, like Discord. Ids are minute numbers.
+  function source(key: string, msgs: HistoryMessage[]): HistorySource<string> & { calls: number } {
+    const src = {
+      key,
+      calls: 0,
+      async fetch(before: string | undefined) {
+        src.calls++;
+        const cut = before === undefined ? Infinity : Number(before);
+        return msgs.filter((m) => Number(m.id) < cut).sort((a, b) => Number(b.id) - Number(a.id)).slice(0, 100);
+      },
+    };
+    return src;
+  }
+  const ts = (minute: number) => new Date(t0 + minute * MIN);
+  const mk = (minute: number, author: string): HistoryMessage => ({ ...h(String(minute), author, 0), createdAt: ts(minute) });
+
+  // Busy channel: a new author every 20 minutes for the last ~1000 minutes plus filler replies; quiet channel: one starter per day long ago.
+  const busy: HistoryMessage[] = [];
+  for (let m = 100_000; m < 101_000; m++) busy.push(mk(m, m % 20 === 0 ? `s${m}` : "chatter"));
+  const quiet: HistoryMessage[] = [];
+  for (let d = 0; d < 50; d++) quiet.push(mk(d * 1440 + 7, `q${d}`));
+
+  it("takes the newest starters overall, not old ones from quiet channels", async () => {
+    const res = await collectLatestStarters([source("busy", busy), source("quiet", quiet)], { count: 30 });
+    expect(res.picked).toHaveLength(30);
+    expect(res.picked.every((p) => p.key === "busy")).toBe(true);
+    const mins = res.picked.map((p) => Number(p.message.id));
+    expect(Math.min(...mins)).toBeGreaterThan(100_000);
+    expect(mins).toEqual([...mins].sort((a, b) => b - a));
+  });
+
+  it("reads the busy channel further back when it needs more", async () => {
+    const res = await collectLatestStarters([source("busy", busy), source("quiet", quiet)], { count: 60 });
+    // the busy channel has ~50 starters (every 20 min over 1000 min; chatter isn't one), so quiet ones fill in by date
+    expect(res.picked).toHaveLength(60);
+    expect(res.picked.filter((p) => p.key === "quiet").length).toBeGreaterThan(0);
+    const mins = res.picked.map((p) => Number(p.message.id));
+    expect(mins).toEqual([...mins].sort((a, b) => b - a));
+  });
+
+  it("respects a date range", async () => {
+    const res = await collectLatestStarters([source("busy", busy), source("quiet", quiet)], {
+      count: 1000,
+      from: ts(10 * 1440).getTime(),
+      to: ts(20 * 1440).getTime(),
+    });
+    expect(res.picked.map((p) => p.message.authorId).sort()).toEqual(Array.from({ length: 10 }, (_, i) => `q${i + 10}`).sort());
+  });
+
+  it("snowflakes order like times", () => {
+    expect(BigInt(snowflakeAt(Date.UTC(2026, 0, 2))) > BigInt(snowflakeAt(Date.UTC(2026, 0, 1)))).toBe(true);
   });
 });
