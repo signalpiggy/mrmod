@@ -15,7 +15,7 @@ import {
   type HistorySource,
   type MessageInput,
 } from "@mrmod/core";
-import { ChannelType, MessageType, PermissionFlagsBits, type Client, type Collection, type GuildMember, type Message } from "discord.js";
+import { ChannelType, MessageType, PermissionFlagsBits, type Client, type Collection, type GuildMember, type Message, type Role } from "discord.js";
 import { log } from "./log.js";
 import type { BotState } from "./state.js";
 
@@ -67,7 +67,18 @@ export async function listChannels(client: Client, guildId: string, settings: Bo
     else if (!perms.has(PermissionFlagsBits.ReadMessageHistory)) why = "bot lacks Read Message History here";
     const note =
       c.id === settings.modlogChannelId ? "mod log" : c.id === settings.alertChannelId ? "alert channel" : settings.exemptChannelIds.includes(c.id) ? "exempt in Settings" : null;
-    info.push({ id: c.id, name: c.name, parent: c.parent?.name ?? null, kind, readable: !why, note: why ?? note });
+    // For hidden channels, say which roles can see it, so the admin knows which role to give the bot.
+    const canSee = (r: Role) => Boolean(c.permissionsFor(r)?.has(PermissionFlagsBits.ViewChannel));
+    const isPublic = canSee(guild.roles.everyone);
+    const visibleTo =
+      perms?.has(PermissionFlagsBits.ViewChannel) || isPublic
+        ? []
+        : [...guild.roles.cache.values()]
+            .filter((r) => r.id !== guild.id && !r.managed && !r.permissions.has(PermissionFlagsBits.Administrator) && canSee(r))
+            .sort((a, b) => a.position - b.position)
+            .slice(0, 4)
+            .map((r) => r.name);
+    info.push({ id: c.id, name: c.name, parent: c.parent?.name ?? null, kind, readable: !why, note: why ?? note, public: isPublic, visibleTo });
     if (!why) readable.push(c as unknown as Readable);
   }
   return { info, readable };

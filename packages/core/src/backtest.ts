@@ -118,6 +118,15 @@ export interface ChannelInfo {
   readable: boolean;
   /** Why it can't be read, or a note (exempt, mod log). */
   note: string | null;
+  /** @everyone can see it. */
+  public?: boolean;
+  /** When the bot can't see it: roles (not admin/bot roles) that can, lowest first. */
+  visibleTo?: string[];
+}
+
+/** Channels the bot can't see, so it never moderates them. */
+export function unseenChannels(channels: ChannelInfo[]): ChannelInfo[] {
+  return channels.filter((c) => c.note === "bot can't see this channel");
 }
 
 /** Hub -> bot: start a backtest. Takes the newest `count` starters, optionally only those sent between `from` and `to` (ISO times). */

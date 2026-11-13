@@ -148,7 +148,7 @@ export function registerBacktest(app: Hono<{ Variables: { actor: string } }>, db
                           <input type="checkbox" name="channel" value={ch.id} checked={chosen.has(ch.id) || undefined} disabled={!ch.readable || undefined} />
                           {ch.kind === "thread" ? "🧵 " : "#"}
                           {ch.name}
-                          {ch.note && <span class="why">{ch.note}</span>}
+                          {ch.note && <span class="why">{ch.note}{ch.visibleTo?.length ? ` (give it @${ch.visibleTo[0]})` : ""}</span>}
                         </label>
                       ))}
                   </fieldset>

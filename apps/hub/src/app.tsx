@@ -25,6 +25,7 @@ import { Hono, type Context } from "hono";
 import { deleteCookie, getSignedCookie, setSignedCookie } from "hono/cookie";
 import { checkPassword, checkSetupCode, getAdmin, setPassword, tooManyAttempts, validPassword } from "./auth.js";
 import { registerBacktest } from "./backtest.js";
+import { registerLookup, unseenBanner, UNSEEN_CSS } from "./lookup.js";
 import { ago, FONTS, Layout, ModePill, SuggestedAnswerBox } from "./layout.js";
 import { kindOf, LOG_CSS, LOG_JS, prettyVerdict, TABS } from "./logview.js";
 
@@ -309,6 +310,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
   app.get("/decisions", async (c) => {
     const q = c.req.query();
     const conds = [];
+    if (q.id && /^\d+$/.test(q.id)) conds.push(eq(decisions.id, Number(q.id)));
     if (q.rule) conds.push(eq(decisions.ruleId, q.rule));
     if (q.label === "none") conds.push(isNull(decisions.label));
     else if (q.label) conds.push(eq(decisions.label, q.label));
@@ -324,6 +326,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
     const ruleRows = await loadRules(db);
     const settings = await loadSettings(db);
     const reviewed = rows.filter((r) => r.label).length;
+    const unseen = await unseenBanner(db);
     const tab = q.label === "none" && !q.rule && !q.matched ? "?label=none" : q.matched === "1" && !q.rule && !q.label ? "?matched=1" : q.matched === "q" && !q.rule && !q.label ? "?matched=q" : !q.rule && !q.label && !q.matched ? "" : "custom";
     return c.html(
       <Layout title="Message log" path="/decisions" bleed flash={c.req.query("flash") ?? undefined}>
@@ -337,11 +340,16 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
           </div>
           <div class="right">
             <ModePill mode={settings.globalMode === "shadow" ? "shadow" : "enforce"} />
+            <a class="btn small ghost" href="/lookup">
+              Find by link
+            </a>
             <a class="btn small ghost" href="">
               Refresh
             </a>
           </div>
         </div>
+        {unseen}
+        {unseen && <style dangerouslySetInnerHTML={{ __html: UNSEEN_CSS }} />}
         <div class="tq-split">
           <section class="tq-queue" aria-label="Messages">
             <div class="tq-tabs">
@@ -598,6 +606,7 @@ export function createApp(db: DB, sessionSecret: string, opts: { secureCookies: 
 
   // ---------- backtesting ----------
   registerBacktest(app, db);
+  registerLookup(app, db);
 
   // ---------- rules ----------
   app.get("/rules", async (c) => {
